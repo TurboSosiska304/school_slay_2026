@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SCHOOL SLAY AWARDS 2025 — Online Voting</title>
   <meta name="description" content="SCHOOL SLAY AWARDS 2025 — онлайн-голосование: номинации, кандидаты, результаты." />
-  <!-- TailwindCSS CDN -->
+  <!-- TailwindCSS CDN (ок для демо/школьного проекта) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -35,10 +35,9 @@
 <body class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-slate-100">
   <div id="root"></div>
 
-  <!-- React & React Router -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-router-dom@6/umd/react-router-dom.development.js" crossorigin></script>
+  <!-- React -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
   <!-- Firebase (compat API для простоты) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -49,47 +48,131 @@
 
   <script type="text/babel">
     // --- Firebase init -------------------------------------------------------
-    // 1. Создайте проект Firebase и веб-приложение.
-    // 2. Замените все значения ниже на свои из настроек Firebase.
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyCDXF_Oi8EvO891rhHA1a7YovzQjadkXzs",
-  authDomain: "school-slay-2025.firebaseapp.com",
-  projectId: "school-slay-2025",
-  storageBucket: "school-slay-2025.firebasestorage.app",
-  messagingSenderId: "399947235194",
-  appId: "1:399947235194:web:0fa70f60052dccc06360c3",
-  measurementId: "G-L37NYESHC7"
-};
+    const firebaseConfig = {
+      apiKey: "AIzaSyCDXF_Oi8EvO891rhHA1a7YovzQjadkXzs",
+      authDomain: "school-slay-2025.firebaseapp.com",
+      projectId: "school-slay-2025",
+      storageBucket: "school-slay-2025.firebasestorage.app",
+      messagingSenderId: "399947235194",
+      appId: "1:399947235194:web:0fa70f60052dccc06360c3",
+      measurementId: "G-L37NYESHC7"
+    };
 
     if (!firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
     }
     const db = firebase.firestore();
 
-    // --- React / Router shortcuts --------------------------------------------
-    const { useState, useEffect } = React;
-    const {
-      HashRouter,
-      Routes,
-      Route,
-      Link,
-      NavLink,
-      useParams,
-      useNavigate,
-    } = ReactRouterDOM;
+    // --- React hooks ---------------------------------------------------------
+    const { useState, useEffect, useContext, createContext } = React;
 
-    // !!! Замените этот пароль перед деплоем !!!
+    // --- Простой hash-роутер -------------------------------------------------
+    function parseHash() {
+      let hash = window.location.hash || "#/";
+      hash = hash.replace(/^#/, "");
+      if (!hash.startsWith("/")) hash = "/" + hash;
+      const path = hash;
+      const segments = path.split("/").filter(Boolean); // ['categories', 'abc']
+
+      let name = "home";
+      const params = {};
+
+      if (segments.length === 0) {
+        name = "home";
+      } else if (segments[0] === "categories") {
+        if (segments[1]) {
+          name = "categoryDetail";
+          params.categoryId = segments[1];
+        } else {
+          name = "categories";
+        }
+      } else if (segments[0] === "results") {
+        name = "results";
+      } else if (segments[0] === "admin") {
+        name = "admin";
+      } else {
+        name = "notfound";
+      }
+
+      return { name, path, segments, params };
+    }
+
+    function normalizeTo(to) {
+      if (!to) return "/";
+      if (to.startsWith("#")) to = to.slice(1);
+      if (!to.startsWith("/")) to = "/" + to;
+      return to;
+    }
+
+    const RouterContext = createContext(null);
+
+    const RouterProvider = ({ children }) => {
+      const [route, setRoute] = useState(() => parseHash());
+
+      useEffect(() => {
+        if (!window.location.hash) {
+          window.location.hash = "#/";
+        }
+        const handler = () => setRoute(parseHash());
+        window.addEventListener("hashchange", handler);
+        return () => window.removeEventListener("hashchange", handler);
+      }, []);
+
+      const navigate = (to) => {
+        const norm = normalizeTo(to);
+        if ("#" + norm === window.location.hash) return;
+        window.location.hash = "#" + norm;
+      };
+
+      return (
+        <RouterContext.Provider value={{ route, navigate }}>
+          {children}
+        </RouterContext.Provider>
+      );
+    };
+
+    const useRouter = () => useContext(RouterContext);
+
+    const Link = ({ to, children, className }) => {
+      const { navigate } = useRouter();
+      const handleClick = (e) => {
+        e.preventDefault();
+        navigate(to);
+      };
+      const href = "#" + normalizeTo(to);
+      return (
+        <a href={href} className={className} onClick={handleClick}>
+          {children}
+        </a>
+      );
+    };
+
+    const NavLink = ({ to, children, className }) => {
+      const { route, navigate } = useRouter();
+      const handleClick = (e) => {
+        e.preventDefault();
+        navigate(to);
+      };
+      const href = "#" + normalizeTo(to);
+      const targetPath = normalizeTo(to);
+      const isActive =
+        route.path === targetPath ||
+        (targetPath !== "/" && route.path.startsWith(targetPath));
+
+      const finalClass =
+        typeof className === "function" ? className({ isActive }) : className;
+
+      return (
+        <a href={href} className={finalClass} onClick={handleClick}>
+          {children}
+        </a>
+      );
+    };
+
+    // !!! Замените этот пароль перед публичным деплоем !!!
     const ADMIN_PASSWORD = "slay2025";
 
     // --- Firestore helpers ---------------------------------------------------
-    async function safeGetCollection(collectionName, queryFn) {
-      let ref = db.collection(collectionName);
-      if (queryFn) ref = queryFn(ref);
-      const snap = await ref.get();
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    }
-
     async function voteWithCode({ code, categoryId, candidateId }) {
       const trimmed = code.trim().toUpperCase();
       if (!trimmed) {
@@ -242,7 +325,7 @@ const firebaseConfig = {
 
     // --- Pages ---------------------------------------------------------------
     const HomePage = () => {
-      const navigate = useNavigate();
+      const { navigate } = useRouter();
 
       return (
         <Layout>
@@ -468,8 +551,7 @@ const firebaseConfig = {
       );
     };
 
-    const CategoryDetailPage = () => {
-      const { categoryId } = useParams();
+    const CategoryDetailPage = ({ categoryId }) => {
       const [category, setCategory] = useState(null);
       const [candidates, setCandidates] = useState([]);
       const [loading, setLoading] = useState(true);
@@ -506,7 +588,7 @@ const firebaseConfig = {
             setLoading(false);
           }
         };
-        load();
+        if (categoryId) load();
       }, [categoryId]);
 
       const selectedCandidate = candidates.find(c => c.id === selectedCandidateId) || null;
@@ -553,11 +635,11 @@ const firebaseConfig = {
         );
       }
 
-      if (error) {
+      if (error || !category) {
         return (
           <Layout>
             <div className="max-w-lg rounded-3xl border border-red-500/40 bg-red-500/10 p-6 text-sm text-red-100">
-              {error}
+              {error || "Такая номинация не найдена."}
               <div className="mt-4">
                 <Link
                   to="/categories"
@@ -573,194 +655,190 @@ const firebaseConfig = {
 
       return (
         <Layout>
-          {!category ? null : (
-            <>
-              <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <Pill>Номинация</Pill>
-                  <h2 className="mt-3 text-2xl sm:text-3xl font-bold text-slate-50">
-                    {category.name}
-                  </h2>
-                  {category.description && (
-                    <p className="mt-2 max-w-xl text-sm text-slate-400">
-                      {category.description}
-                    </p>
-                  )}
+          <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <Pill>Номинация</Pill>
+              <h2 className="mt-3 text-2xl sm:text-3xl font-bold text-slate-50">
+                {category.name}
+              </h2>
+              {category.description && (
+                <p className="mt-2 max-w-xl text-sm text-slate-400">
+                  {category.description}
+                </p>
+              )}
+            </div>
+            <Link
+              to="/categories"
+              className="inline-flex items-center gap-1 rounded-full border border-slate-700/70 bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+            >
+              ← Все номинации
+            </Link>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[3fr,2fr] items-start">
+            <div className="space-y-4">
+              {candidates.length === 0 && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-6 text-sm text-slate-300">
+                  В этой номинации ещё нет кандидатов. Организаторы могут добавить их в{" "}
+                  <Link to="/admin" className="text-sky-300 underline underline-offset-2">
+                    админке
+                  </Link>
+                  .
                 </div>
-                <Link
-                  to="/categories"
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-700/70 bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+              )}
+
+              {candidates.map(candidate => (
+                <button
+                  key={candidate.id}
+                  onClick={() => setSelectedCandidateId(candidate.id)}
+                  className={classNames(
+                    "group flex w-full items-center gap-4 rounded-3xl border px-4 py-3 text-left transition",
+                    "hover:-translate-y-0.5 hover:shadow-xl hover:shadow-fuchsia-500/20",
+                    selectedCandidateId === candidate.id
+                      ? "border-fuchsia-400/70 bg-fuchsia-500/10"
+                      : "border-slate-800/70 bg-slate-900/70 hover:border-fuchsia-500/40"
+                  )}
                 >
-                  ← Все номинации
-                </Link>
-              </div>
-
-              <div className="grid gap-6 lg:grid-cols-[3fr,2fr] items-start">
-                <div className="space-y-4">
-                  {candidates.length === 0 && (
-                    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-6 text-sm text-slate-300">
-                      В этой номинации ещё нет кандидатов. Организаторы могут добавить их в{" "}
-                      <Link to="/admin" className="text-sky-300 underline underline-offset-2">
-                        админке
-                      </Link>
-                      .
-                    </div>
-                  )}
-
-                  {candidates.map(candidate => (
-                    <button
-                      key={candidate.id}
-                      onClick={() => setSelectedCandidateId(candidate.id)}
-                      className={classNames(
-                        "group flex w-full items-center gap-4 rounded-3xl border px-4 py-3 text-left transition",
-                        "hover:-translate-y-0.5 hover:shadow-xl hover:shadow-fuchsia-500/20",
-                        selectedCandidateId === candidate.id
-                          ? "border-fuchsia-400/70 bg-fuchsia-500/10"
-                          : "border-slate-800/70 bg-slate-900/70 hover:border-fuchsia-500/40"
-                      )}
-                    >
-                      <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-800/80 flex-shrink-0">
-                        {candidate.photoUrl ? (
-                          <img
-                            src={candidate.photoUrl}
-                            alt={candidate.name}
-                            className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs text-slate-500">
-                            no photo
-                          </div>
-                        )}
-                        {selectedCandidateId === candidate.id && (
-                          <div className="pointer-events-none absolute inset-0 border-2 border-fuchsia-400/80" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-slate-50">
-                          {candidate.name || "Без имени"}
-                        </p>
-                        {candidate.description && (
-                          <p className="mt-1 text-xs text-slate-400 line-clamp-2">
-                            {candidate.description}
-                          </p>
-                        )}
-                        <p className="mt-2 text-[11px] text-slate-500">
-                          Нажмите, чтобы выбрать этого кандидата.
-                        </p>
-                      </div>
-                      <div>
-                        <span
-                          className={classNames(
-                            "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
-                            selectedCandidateId === candidate.id
-                              ? "bg-fuchsia-500 text-slate-950"
-                              : "border border-slate-700/80 text-slate-400 group-hover:border-fuchsia-400 group-hover:text-fuchsia-200"
-                          )}
-                        >
-                          {selectedCandidateId === candidate.id ? "✓" : "→"}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="glass rounded-3xl p-6">
-                  <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
-                    Голосование
-                  </p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-50">
-                    Отдать голос за кандидата
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Введите выданный вам организаторами код. Каждый код можно использовать только
-                    один раз, и только за одного человека в номинации.
-                  </p>
-
-                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-xs text-slate-300">
-                    <p className="font-medium text-slate-100">Выбранный кандидат</p>
-                    {selectedCandidate ? (
-                      <div className="mt-2 flex items-center gap-3">
-                        <div className="h-10 w-10 overflow-hidden rounded-xl border border-slate-700/80 bg-slate-800">
-                          {selectedCandidate.photoUrl ? (
-                            <img
-                              src={selectedCandidate.photoUrl}
-                              alt={selectedCandidate.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : null}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-50">
-                            {selectedCandidate.name}
-                          </p>
-                          {selectedCandidate.description && (
-                            <p className="text-[11px] text-slate-400 line-clamp-2">
-                              {selectedCandidate.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                  <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-800/80 flex-shrink-0">
+                    {candidate.photoUrl ? (
+                      <img
+                        src={candidate.photoUrl}
+                        alt={candidate.name}
+                        className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
+                      />
                     ) : (
-                      <p className="mt-2 text-xs text-slate-400">
-                        Кандидат не выбран. Сначала кликните по карточке участника слева.
-                      </p>
+                      <div className="flex h-full w-full items-center justify-center text-xs text-slate-500">
+                        no photo
+                      </div>
+                    )}
+                    {selectedCandidateId === candidate.id && (
+                      <div className="pointer-events-none absolute inset-0 border-2 border-fuchsia-400/80" />
                     )}
                   </div>
-
-                  <form onSubmit={handleVote} className="mt-4 space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-slate-200">
-                        Уникальный код голосования
-                      </label>
-                      <input
-                        type="text"
-                        value={code}
-                        onChange={e => setCode(e.target.value)}
-                        placeholder="Например: SLAY-9F3K-LM2Q"
-                        disabled={hasVoted || isVoting}
-                        className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60 disabled:opacity-60"
-                      />
-                      <p className="text-[11px] text-slate-500">
-                        Коды жюри и аудитории выглядят одинаково, но система сама различает их
-                        тип внутри базы данных.
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-50">
+                      {candidate.name || "Без имени"}
+                    </p>
+                    {candidate.description && (
+                      <p className="mt-1 text-xs text-slate-400 line-clamp-2">
+                        {candidate.description}
                       </p>
-                    </div>
-
-                    {status && (
-                      <div
-                        className={classNames(
-                          "rounded-2xl border px-3 py-2 text-xs",
-                          statusType === "success"
-                            ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                            : "border-red-400/60 bg-red-500/10 text-red-100"
-                        )}
-                      >
-                        {status}
-                      </div>
                     )}
-
-                    <button
-                      type="submit"
-                      disabled={hasVoted || isVoting || !selectedCandidateId}
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Нажмите, чтобы выбрать этого кандидата.
+                    </p>
+                  </div>
+                  <div>
+                    <span
                       className={classNames(
-                        "inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition",
-                        hasVoted
-                          ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/60 cursor-default"
-                          : "bg-gradient-to-r from-fuchsia-500 via-sky-400 to-emerald-400 text-slate-950 shadow-glow hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                        "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
+                        selectedCandidateId === candidate.id
+                          ? "bg-fuchsia-500 text-slate-950"
+                          : "border border-slate-700/80 text-slate-400 group-hover:border-fuchsia-400 group-hover:text-fuchsia-200"
                       )}
                     >
-                      {hasVoted ? "Голос учтён" : isVoting ? "Отправляем голос..." : "Голосовать"}
-                    </button>
-                  </form>
+                      {selectedCandidateId === candidate.id ? "✓" : "→"}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
 
-                  <p className="mt-3 text-[11px] text-slate-500">
-                    Повторно использовать один и тот же код нельзя. Если вы ошиблись с выбором
-                    кандидата — обратитесь к организаторам.
+            <div className="glass rounded-3xl p-6">
+              <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+                Голосование
+              </p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-50">
+                Отдать голос за кандидата
+              </h3>
+              <p className="mt-1 text-xs text-slate-400">
+                Введите выданный вам организаторами код. Каждый код можно использовать только
+                один раз, и только за одного человека в номинации.
+              </p>
+
+              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-xs text-slate-300">
+                <p className="font-medium text-slate-100">Выбранный кандидат</p>
+                {selectedCandidate ? (
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="h-10 w-10 overflow-hidden rounded-xl border border-slate-700/80 bg-slate-800">
+                      {selectedCandidate.photoUrl ? (
+                        <img
+                          src={selectedCandidate.photoUrl}
+                          alt={selectedCandidate.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : null}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-50">
+                        {selectedCandidate.name}
+                      </p>
+                      {selectedCandidate.description && (
+                        <p className="text-[11px] text-slate-400 line-clamp-2">
+                          {selectedCandidate.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-400">
+                    Кандидат не выбран. Сначала кликните по карточке участника слева.
+                  </p>
+                )}
+              </div>
+
+              <form onSubmit={handleVote} className="mt-4 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-200">
+                    Уникальный код голосования
+                  </label>
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={e => setCode(e.target.value)}
+                    placeholder="Например: SLAY-9F3K-LM2Q"
+                    disabled={hasVoted || isVoting}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60 disabled:opacity-60"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Коды жюри и аудитории выглядят одинаково, но система сама различает их
+                    тип внутри базы данных.
                   </p>
                 </div>
-              </div>
-            </>
-          )}
+
+                {status && (
+                  <div
+                    className={classNames(
+                      "rounded-2xl border px-3 py-2 text-xs",
+                      statusType === "success"
+                        ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
+                        : "border-red-400/60 bg-red-500/10 text-red-100"
+                    )}
+                  >
+                    {status}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={hasVoted || isVoting || !selectedCandidateId}
+                  className={classNames(
+                    "inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition",
+                    hasVoted
+                      ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/60 cursor-default"
+                      : "bg-gradient-to-r from-fuchsia-500 via-sky-400 to-emerald-400 text-slate-950 shadow-glow hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  )}
+                >
+                  {hasVoted ? "Голос учтён" : isVoting ? "Отправляем голос..." : "Голосовать"}
+                </button>
+              </form>
+
+              <p className="mt-3 text-[11px] text-slate-500">
+                Повторно использовать один и тот же код нельзя. Если вы ошиблись с выбором
+                кандидата — обратитесь к организаторам.
+              </p>
+            </div>
+          </div>
         </Layout>
       );
     };
@@ -1026,7 +1104,8 @@ const firebaseConfig = {
       );
     };
 
-    // --- Admin subcomponents -------------------------------------------------
+    // --- Admin components (из твоего кода, без изменений по роутингу) -------
+
     const AdminCategories = () => {
       const [categories, setCategories] = useState([]);
       const [loading, setLoading] = useState(true);
@@ -1596,7 +1675,6 @@ const firebaseConfig = {
           }
           await batch.commit();
           setGeneratedCodes(codesArr);
-          // reload recent
           const snap = await db
             .collection("codes")
             .orderBy("createdAt", "desc")
@@ -2020,44 +2098,54 @@ const firebaseConfig = {
       );
     };
 
+    const NotFoundPage = () => (
+      <Layout>
+        <div className="mx-auto max-w-md rounded-3xl border border-slate-800 bg-slate-900/70 p-6 text-sm text-slate-200">
+          <p className="text-lg font-semibold text-slate-50">Страница не найдена</p>
+          <p className="mt-2 text-sm text-slate-400">
+            Такой страницы нет в SCHOOL SLAY. Возможно, вы перешли по старой ссылке.
+          </p>
+          <div className="mt-4 flex gap-2">
+            <Link
+              to="/"
+              className="inline-flex flex-1 items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-sky-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-glow hover:brightness-110"
+            >
+              На главную
+            </Link>
+            <Link
+              to="/categories"
+              className="inline-flex flex-1 items-center justify-center rounded-full border border-slate-700/80 bg-slate-950/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 hover:bg-slate-800"
+            >
+              К номинациям
+            </Link>
+          </div>
+        </div>
+      </Layout>
+    );
+
     // --- Root SPA ------------------------------------------------------------
+    const AppRoutes = () => {
+      const { route } = useRouter();
+      switch (route.name) {
+        case "home":
+          return <HomePage />;
+        case "categories":
+          return <CategoriesPage />;
+        case "categoryDetail":
+          return <CategoryDetailPage categoryId={route.params.categoryId} />;
+        case "results":
+          return <ResultsPage />;
+        case "admin":
+          return <AdminPage />;
+        default:
+          return <NotFoundPage />;
+      }
+    };
+
     const App = () => (
-      <HashRouter>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/categories" element={<CategoriesPage />} />
-          <Route path="/categories/:categoryId" element={<CategoryDetailPage />} />
-          <Route path="/results" element={<ResultsPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          <Route
-            path="*"
-            element={
-              <Layout>
-                <div className="mx-auto max-w-md rounded-3xl border border-slate-800 bg-slate-900/70 p-6 text-sm text-slate-200">
-                  <p className="text-lg font-semibold text-slate-50">Страница не найдена</p>
-                  <p className="mt-2 text-sm text-slate-400">
-                    Такой страницы нет в SCHOOL SLAY. Возможно, вы перешли по старой ссылке.
-                  </p>
-                  <div className="mt-4 flex gap-2">
-                    <Link
-                      to="/"
-                      className="inline-flex flex-1 items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-sky-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-glow hover:brightness-110"
-                    >
-                      На главную
-                    </Link>
-                    <Link
-                      to="/categories"
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-slate-700/80 bg-slate-950/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 hover:bg-slate-800"
-                    >
-                      К номинациям
-                    </Link>
-                  </div>
-                </div>
-              </Layout>
-            }
-          />
-        </Routes>
-      </HashRouter>
+      <RouterProvider>
+        <AppRoutes />
+      </RouterProvider>
     );
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
