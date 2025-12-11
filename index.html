@@ -1,0 +1,2067 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCHOOL SLAY AWARDS 2025 — Online Voting</title>
+  <meta name="description" content="SCHOOL SLAY AWARDS 2025 — онлайн-голосование: номинации, кандидаты, результаты." />
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ["system-ui", "ui-sans-serif", "Inter", "sans-serif"] },
+          colors: {
+            neon: { pink: "#ff4ecd", purple: "#a855f7", cyan: "#22d3ee" }
+          },
+          boxShadow: {
+            glow: "0 0 80px rgba(244, 114, 182, 0.35)"
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
+    .glass {
+      background: linear-gradient(135deg, rgba(15,23,42,0.85), rgba(24,24,27,0.85));
+      border: 1px solid rgba(148,163,184,0.35);
+      box-shadow: 0 22px 70px rgba(15,23,42,0.85);
+      backdrop-filter: blur(20px);
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-slate-100">
+  <div id="root"></div>
+
+  <!-- React & React Router -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-router-dom@6/umd/react-router-dom.development.js" crossorigin></script>
+
+  <!-- Firebase (compat API для простоты) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <!-- Babel для трансформации JSX прямо в браузере -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    // --- Firebase init -------------------------------------------------------
+    // 1. Создайте проект Firebase и веб-приложение.
+    // 2. Замените все значения ниже на свои из настроек Firebase.
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyCDXF_Oi8EvO891rhHA1a7YovzQjadkXzs",
+  authDomain: "school-slay-2025.firebaseapp.com",
+  projectId: "school-slay-2025",
+  storageBucket: "school-slay-2025.firebasestorage.app",
+  messagingSenderId: "399947235194",
+  appId: "1:399947235194:web:0fa70f60052dccc06360c3",
+  measurementId: "G-L37NYESHC7"
+};
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
+
+    // --- React / Router shortcuts --------------------------------------------
+    const { useState, useEffect } = React;
+    const {
+      HashRouter,
+      Routes,
+      Route,
+      Link,
+      NavLink,
+      useParams,
+      useNavigate,
+    } = ReactRouterDOM;
+
+    // !!! Замените этот пароль перед деплоем !!!
+    const ADMIN_PASSWORD = "slay2025";
+
+    // --- Firestore helpers ---------------------------------------------------
+    async function safeGetCollection(collectionName, queryFn) {
+      let ref = db.collection(collectionName);
+      if (queryFn) ref = queryFn(ref);
+      const snap = await ref.get();
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+
+    async function voteWithCode({ code, categoryId, candidateId }) {
+      const trimmed = code.trim().toUpperCase();
+      if (!trimmed) {
+        return { ok: false, message: "Введите код голосования." };
+      }
+
+      const codesRef = db.collection("codes");
+      const snap = await codesRef.where("code", "==", trimmed).limit(1).get();
+
+      if (snap.empty) {
+        return { ok: false, message: "Неверный код. Проверьте и попробуйте ещё раз." };
+      }
+
+      const doc = snap.docs[0];
+      const data = doc.data();
+
+      if (data.used) {
+        return { ok: false, message: "Этот код уже был использован." };
+      }
+
+      if (data.categoryId && data.categoryId !== categoryId) {
+        return { ok: false, message: "Этот код привязан к другой номинации." };
+      }
+
+      const type = data.type || "audience";
+
+      const batch = db.batch();
+      const voteRef = db.collection("votes").doc();
+
+      batch.set(voteRef, {
+        categoryId,
+        candidateId,
+        code: data.code,
+        codeRef: doc.ref,
+        type,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+
+      batch.update(doc.ref, {
+        used: true,
+        usedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        usedCategoryId: categoryId,
+        usedCandidateId: candidateId,
+      });
+
+      await batch.commit();
+      return { ok: true, message: "Голос засчитан! Спасибо 💜" };
+    }
+
+    // --- UI helpers ----------------------------------------------------------
+    function classNames(...classes) {
+      return classes.filter(Boolean).join(" ");
+    }
+
+    const LoadingSpinner = ({ label = "Загрузка..." }) => (
+      <div className="flex items-center justify-center py-16">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 rounded-full border-2 border-fuchsia-400 border-t-transparent animate-spin" />
+          <p className="text-sm text-slate-300 tracking-wide uppercase">{label}</p>
+        </div>
+      </div>
+    );
+
+    const Pill = ({ children }) => (
+      <span className="inline-flex items-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-medium tracking-wide uppercase text-fuchsia-200">
+        {children}
+      </span>
+    );
+
+    // --- Layout --------------------------------------------------------------
+    const Header = () => (
+      <header className="sticky top-0 z-30 border-b border-slate-800/60 bg-slate-950/70 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+          <Link to="/" className="group inline-flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-fuchsia-500 via-sky-400 to-emerald-400 shadow-glow group-hover:scale-105 transition" />
+            <div>
+              <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                SCHOOL SLAY
+              </p>
+              <p className="text-sm font-semibold text-slate-100 group-hover:text-fuchsia-200 transition">
+                Awards 2025
+              </p>
+            </div>
+          </Link>
+          <nav className="flex items-center gap-2 text-sm">
+            <NavLink
+              to="/categories"
+              className={({ isActive }) =>
+                classNames(
+                  "rounded-full px-3 py-1.5 transition text-xs font-medium tracking-wide uppercase",
+                  isActive
+                    ? "bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/60"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+                )
+              }
+            >
+              Номинации
+            </NavLink>
+            <NavLink
+              to="/results"
+              className={({ isActive }) =>
+                classNames(
+                  "rounded-full px-3 py-1.5 transition text-xs font-medium tracking-wide uppercase",
+                  isActive
+                    ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/60"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+                )
+              }
+            >
+              Результаты
+            </NavLink>
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                classNames(
+                  "rounded-full px-3 py-1.5 transition text-xs font-medium tracking-wide uppercase",
+                  isActive
+                    ? "bg-sky-500/20 text-sky-200 border border-sky-400/60"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                )
+              }
+            >
+              Админка
+            </NavLink>
+          </nav>
+        </div>
+      </header>
+    );
+
+    const Footer = () => (
+      <footer className="border-t border-slate-900/60 bg-slate-950/80">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-xs text-slate-500 md:flex-row md:items-center md:justify-between">
+          <p>© {new Date().getFullYear()} SCHOOL SLAY AWARDS. Все права свободны.</p>
+          <p className="text-[11px] text-slate-500">
+            Голосование: 70% аудитория · 30% жюри · Firebase + React SPA.
+          </p>
+        </div>
+      </footer>
+    );
+
+    const Layout = ({ children }) => (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <main className="flex-1">
+          <div className="mx-auto max-w-6xl px-4 py-10">{children}</div>
+        </main>
+        <Footer />
+      </div>
+    );
+
+    // --- Pages ---------------------------------------------------------------
+    const HomePage = () => {
+      const navigate = useNavigate();
+
+      return (
+        <Layout>
+          <section className="grid gap-10 lg:grid-cols-[3fr,2fr] items-center">
+            <div className="space-y-8">
+              <Pill>SCHOOL SLAY AWARD • 2025</Pill>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight">
+                <span className="block bg-gradient-to-r from-fuchsia-400 via-sky-300 to-emerald-300 bg-clip-text text-transparent">
+                  SCHOOL SLAY
+                </span>
+                <span className="mt-1 block text-slate-100">
+                  Award 2025
+                </span>
+              </h1>
+              <p className="max-w-xl text-sm sm:text-base text-slate-300">
+                Самая стильная школьная премия года. Голосуй за тех, кто{" "}
+                <span className="text-fuchsia-300 font-semibold">реально слэйт</span>:
+                лучшие образы, вайб, креатив и харизма.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => navigate("/categories")}
+                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 via-sky-400 to-emerald-400 px-6 py-3 text-sm font-semibold text-slate-950 shadow-glow transition hover:brightness-110"
+                >
+                  Перейти к номинациям
+                  <span className="text-lg">→</span>
+                </button>
+                <button
+                  onClick={() => navigate("/results")}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-700/70 bg-slate-900/80 px-6 py-3 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800"
+                >
+                  Смотреть результаты
+                </button>
+              </div>
+              <div className="grid gap-3 text-xs text-slate-400 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                    Голосование
+                  </p>
+                  <p className="mt-1 font-semibold text-slate-100">
+                    Уникальные коды
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Каждый код — один голос. Прозрачный и честный подсчёт.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                    Формула
+                  </p>
+                  <p className="mt-1 font-semibold text-slate-100">
+                    70% аудитория · 30% жюри
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Коды зрителей и жюри считаются отдельно и смешиваются в финале.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                    Live-обновление
+                  </p>
+                  <p className="mt-1 font-semibold text-slate-100">
+                    Firebase Firestore
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Все данные хранятся в облаке. Админка прямо в браузере.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative">
+              <div className="glass rounded-3xl p-6 sm:p-8">
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                  LIVE DASHBOARD
+                </p>
+                <p className="mt-2 text-lg font-semibold text-slate-100">
+                  SCHOOL SLAY • Панель голосования
+                </p>
+                <div className="mt-6 space-y-4 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-300">Заполненность кодов</span>
+                    <span className="text-fuchsia-300 font-semibold">75%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                    <div className="h-full w-3/4 rounded-full bg-gradient-to-r from-fuchsia-500 via-sky-400 to-emerald-400" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-[11px]">
+                    <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
+                      <p className="text-slate-400">Номинаций</p>
+                      <p className="mt-1 text-lg font-semibold text-fuchsia-200">8</p>
+                    </div>
+                    <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-3">
+                      <p className="text-slate-400">Кандидатов</p>
+                      <p className="mt-1 text-lg font-semibold text-sky-200">32</p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+                      <p className="text-slate-400">Голосов</p>
+                      <p className="mt-1 text-lg font-semibold text-emerald-200">1 248</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-6 flex items-center justify-between border-t border-slate-800 pt-4 text-[11px] text-slate-400">
+                  <span>Админ-панель доступна только организаторам.</span>
+                  <Link
+                    to="/admin"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-700/70 px-3 py-1 text-xs font-medium text-slate-200 hover:border-sky-400 hover:text-sky-200 transition"
+                  >
+                    Войти в админку
+                    <span>↗</span>
+                  </Link>
+                </div>
+              </div>
+
+              <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-sky-400/20 blur-3xl" />
+            </div>
+          </section>
+        </Layout>
+      );
+    };
+
+    const CategoriesPage = () => {
+      const [categories, setCategories] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        const load = async () => {
+          setLoading(true);
+          setError(null);
+          try {
+            let ref = db.collection("categories");
+            try {
+              ref = ref.orderBy("order", "asc");
+            } catch (_) {}
+            const snap = await ref.get();
+            const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setCategories(list);
+          } catch (e) {
+            console.error(e);
+            setError("Не удалось загрузить список номинаций.");
+          } finally {
+            setLoading(false);
+          }
+        };
+        load();
+      }, []);
+
+      return (
+        <Layout>
+          <div className="mb-8 flex items-center justify-between gap-4">
+            <div>
+              <Pill>Номинации</Pill>
+              <h2 className="mt-3 text-2xl sm:text-3xl font-bold text-slate-50">
+                Все категории SCHOOL SLAY 2025
+              </h2>
+              <p className="mt-2 text-sm text-slate-400 max-w-xl">
+                Выбери номинацию, посмотри кандидатов и проголосуй с помощью своего уникального кода.
+              </p>
+            </div>
+            <div className="hidden sm:flex flex-col items-end text-xs text-slate-400">
+              <span>Коды зрителей и жюри учитываются отдельно.</span>
+              <span>Система сама считает 70% + 30%.</span>
+            </div>
+          </div>
+
+          {loading && <LoadingSpinner label="Загружаем номинации..." />}
+          {error && (
+            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && categories.length === 0 && (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-8 text-sm text-slate-300">
+              Номинаций пока нет. Зайдите в{" "}
+              <Link to="/admin" className="text-sky-300 underline underline-offset-2">
+                админку
+              </Link>{" "}
+              и создайте первые категории.
+            </div>
+          )}
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {categories.map((cat) => (
+              <Link
+                key={cat.id}
+                to={`/categories/${cat.id}`}
+                className="group relative overflow-hidden rounded-3xl border border-slate-800/70 bg-slate-900/70 p-6 transition hover:-translate-y-1 hover:border-fuchsia-500/60 hover:bg-slate-900 hover:shadow-2xl hover:shadow-fuchsia-500/25"
+              >
+                <div className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition">
+                  <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-fuchsia-500/20 blur-3xl" />
+                </div>
+                <div className="flex items-start justify-between gap-4 relative">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+                      Номинация
+                    </p>
+                    <h3 className="mt-1 text-lg font-semibold text-slate-50">
+                      {cat.name || "Без названия"}
+                    </h3>
+                    {cat.description && (
+                      <p className="mt-2 text-xs text-slate-400 line-clamp-3">
+                        {cat.description}
+                      </p>
+                    )}
+                  </div>
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-700/80 bg-slate-900/90 text-slate-400 group-hover:border-fuchsia-400 group-hover:text-fuchsia-200 transition">
+                    →
+                  </span>
+                </div>
+                <div className="mt-4 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Нажми, чтобы посмотреть кандидатов и проголосовать</span>
+                  <span className="rounded-full border border-slate-700/60 px-2 py-0.5">
+                    Код обязателен
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </Layout>
+      );
+    };
+
+    const CategoryDetailPage = () => {
+      const { categoryId } = useParams();
+      const [category, setCategory] = useState(null);
+      const [candidates, setCandidates] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+      const [code, setCode] = useState("");
+      const [status, setStatus] = useState(null);
+      const [statusType, setStatusType] = useState("info");
+      const [isVoting, setIsVoting] = useState(false);
+      const [hasVoted, setHasVoted] = useState(false);
+
+      useEffect(() => {
+        const load = async () => {
+          setLoading(true);
+          setError(null);
+          try {
+            const doc = await db.collection("categories").doc(categoryId).get();
+            if (!doc.exists) {
+              setError("Такая номинация не найдена.");
+              setLoading(false);
+              return;
+            }
+            setCategory({ id: doc.id, ...doc.data() });
+            const candSnap = await db
+              .collection("candidates")
+              .where("categoryId", "==", categoryId)
+              .get();
+            const list = candSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setCandidates(list);
+          } catch (e) {
+            console.error(e);
+            setError("Не удалось загрузить данные по номинации.");
+          } finally {
+            setLoading(false);
+          }
+        };
+        load();
+      }, [categoryId]);
+
+      const selectedCandidate = candidates.find(c => c.id === selectedCandidateId) || null;
+
+      const handleVote = async (e) => {
+        e.preventDefault();
+        if (!selectedCandidateId) {
+          setStatusType("error");
+          setStatus("Выберите кандидата, за которого хотите проголосовать.");
+          return;
+        }
+        if (!code.trim()) {
+          setStatusType("error");
+          setStatus("Введите уникальный код голосования.");
+          return;
+        }
+        setIsVoting(true);
+        setStatus(null);
+        try {
+          const result = await voteWithCode({
+            code,
+            categoryId,
+            candidateId: selectedCandidateId,
+          });
+          setStatusType(result.ok ? "success" : "error");
+          setStatus(result.message);
+          if (result.ok) {
+            setHasVoted(true);
+          }
+        } catch (e) {
+          console.error(e);
+          setStatusType("error");
+          setStatus("Произошла ошибка при отправке голоса. Попробуйте ещё раз.");
+        } finally {
+          setIsVoting(false);
+        }
+      };
+
+      if (loading) {
+        return (
+          <Layout>
+            <LoadingSpinner label="Загружаем номинацию..." />
+          </Layout>
+        );
+      }
+
+      if (error) {
+        return (
+          <Layout>
+            <div className="max-w-lg rounded-3xl border border-red-500/40 bg-red-500/10 p-6 text-sm text-red-100">
+              {error}
+              <div className="mt-4">
+                <Link
+                  to="/categories"
+                  className="inline-flex items-center gap-1 rounded-full border border-red-400/60 bg-red-500/10 px-4 py-1.5 text-xs font-medium text-red-50 hover:bg-red-500/20 transition"
+                >
+                  ← Вернуться к списку номинаций
+                </Link>
+              </div>
+            </div>
+          </Layout>
+        );
+      }
+
+      return (
+        <Layout>
+          {!category ? null : (
+            <>
+              <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <Pill>Номинация</Pill>
+                  <h2 className="mt-3 text-2xl sm:text-3xl font-bold text-slate-50">
+                    {category.name}
+                  </h2>
+                  {category.description && (
+                    <p className="mt-2 max-w-xl text-sm text-slate-400">
+                      {category.description}
+                    </p>
+                  )}
+                </div>
+                <Link
+                  to="/categories"
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-700/70 bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+                >
+                  ← Все номинации
+                </Link>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-[3fr,2fr] items-start">
+                <div className="space-y-4">
+                  {candidates.length === 0 && (
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-6 text-sm text-slate-300">
+                      В этой номинации ещё нет кандидатов. Организаторы могут добавить их в{" "}
+                      <Link to="/admin" className="text-sky-300 underline underline-offset-2">
+                        админке
+                      </Link>
+                      .
+                    </div>
+                  )}
+
+                  {candidates.map(candidate => (
+                    <button
+                      key={candidate.id}
+                      onClick={() => setSelectedCandidateId(candidate.id)}
+                      className={classNames(
+                        "group flex w-full items-center gap-4 rounded-3xl border px-4 py-3 text-left transition",
+                        "hover:-translate-y-0.5 hover:shadow-xl hover:shadow-fuchsia-500/20",
+                        selectedCandidateId === candidate.id
+                          ? "border-fuchsia-400/70 bg-fuchsia-500/10"
+                          : "border-slate-800/70 bg-slate-900/70 hover:border-fuchsia-500/40"
+                      )}
+                    >
+                      <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-800/80 flex-shrink-0">
+                        {candidate.photoUrl ? (
+                          <img
+                            src={candidate.photoUrl}
+                            alt={candidate.name}
+                            className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-xs text-slate-500">
+                            no photo
+                          </div>
+                        )}
+                        {selectedCandidateId === candidate.id && (
+                          <div className="pointer-events-none absolute inset-0 border-2 border-fuchsia-400/80" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-slate-50">
+                          {candidate.name || "Без имени"}
+                        </p>
+                        {candidate.description && (
+                          <p className="mt-1 text-xs text-slate-400 line-clamp-2">
+                            {candidate.description}
+                          </p>
+                        )}
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          Нажмите, чтобы выбрать этого кандидата.
+                        </p>
+                      </div>
+                      <div>
+                        <span
+                          className={classNames(
+                            "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
+                            selectedCandidateId === candidate.id
+                              ? "bg-fuchsia-500 text-slate-950"
+                              : "border border-slate-700/80 text-slate-400 group-hover:border-fuchsia-400 group-hover:text-fuchsia-200"
+                          )}
+                        >
+                          {selectedCandidateId === candidate.id ? "✓" : "→"}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="glass rounded-3xl p-6">
+                  <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+                    Голосование
+                  </p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-50">
+                    Отдать голос за кандидата
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Введите выданный вам организаторами код. Каждый код можно использовать только
+                    один раз, и только за одного человека в номинации.
+                  </p>
+
+                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-xs text-slate-300">
+                    <p className="font-medium text-slate-100">Выбранный кандидат</p>
+                    {selectedCandidate ? (
+                      <div className="mt-2 flex items-center gap-3">
+                        <div className="h-10 w-10 overflow-hidden rounded-xl border border-slate-700/80 bg-slate-800">
+                          {selectedCandidate.photoUrl ? (
+                            <img
+                              src={selectedCandidate.photoUrl}
+                              alt={selectedCandidate.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : null}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-50">
+                            {selectedCandidate.name}
+                          </p>
+                          {selectedCandidate.description && (
+                            <p className="text-[11px] text-slate-400 line-clamp-2">
+                              {selectedCandidate.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-400">
+                        Кандидат не выбран. Сначала кликните по карточке участника слева.
+                      </p>
+                    )}
+                  </div>
+
+                  <form onSubmit={handleVote} className="mt-4 space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-slate-200">
+                        Уникальный код голосования
+                      </label>
+                      <input
+                        type="text"
+                        value={code}
+                        onChange={e => setCode(e.target.value)}
+                        placeholder="Например: SLAY-9F3K-LM2Q"
+                        disabled={hasVoted || isVoting}
+                        className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60 disabled:opacity-60"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        Коды жюри и аудитории выглядят одинаково, но система сама различает их
+                        тип внутри базы данных.
+                      </p>
+                    </div>
+
+                    {status && (
+                      <div
+                        className={classNames(
+                          "rounded-2xl border px-3 py-2 text-xs",
+                          statusType === "success"
+                            ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
+                            : "border-red-400/60 bg-red-500/10 text-red-100"
+                        )}
+                      >
+                        {status}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={hasVoted || isVoting || !selectedCandidateId}
+                      className={classNames(
+                        "inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition",
+                        hasVoted
+                          ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/60 cursor-default"
+                          : "bg-gradient-to-r from-fuchsia-500 via-sky-400 to-emerald-400 text-slate-950 shadow-glow hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                      )}
+                    >
+                      {hasVoted ? "Голос учтён" : isVoting ? "Отправляем голос..." : "Голосовать"}
+                    </button>
+                  </form>
+
+                  <p className="mt-3 text-[11px] text-slate-500">
+                    Повторно использовать один и тот же код нельзя. Если вы ошиблись с выбором
+                    кандидата — обратитесь к организаторам.
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+        </Layout>
+      );
+    };
+
+    const ResultsPage = () => {
+      const [categories, setCategories] = useState([]);
+      const [resultsByCategory, setResultsByCategory] = useState({});
+      const [winnersByCategory, setWinnersByCategory] = useState({});
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        const load = async () => {
+          setLoading(true);
+          setError(null);
+          try {
+            const [catSnap, candSnap, votesSnap] = await Promise.all([
+              db.collection("categories").get(),
+              db.collection("candidates").get(),
+              db.collection("votes").get(),
+            ]);
+
+            const categoriesList = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const candidates = candSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const votes = votesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const candidatesByCategory = {};
+            candidates.forEach(c => {
+              const catId = c.categoryId || "unknown";
+              if (!candidatesByCategory[catId]) {
+                candidatesByCategory[catId] = [];
+              }
+              candidatesByCategory[catId].push(c);
+            });
+
+            const statsByCategory = {};
+            votes.forEach(v => {
+              const catId = v.categoryId || "unknown";
+              if (!statsByCategory[catId]) {
+                statsByCategory[catId] = {
+                  audienceTotals: {},
+                  juryTotals: {},
+                  totalAudience: 0,
+                  totalJury: 0,
+                };
+              }
+              const type = v.type || "audience";
+              const candidateId = v.candidateId;
+              const stats = statsByCategory[catId];
+              if (type === "jury") {
+                stats.juryTotals[candidateId] = (stats.juryTotals[candidateId] || 0) + 1;
+                stats.totalJury += 1;
+              } else {
+                stats.audienceTotals[candidateId] = (stats.audienceTotals[candidateId] || 0) + 1;
+                stats.totalAudience += 1;
+              }
+            });
+
+            const resByCategory = {};
+            const winners = {};
+
+            categoriesList.forEach(cat => {
+              const catId = cat.id;
+              const stats =
+                statsByCategory[catId] || {
+                  audienceTotals: {},
+                  juryTotals: {},
+                  totalAudience: 0,
+                  totalJury: 0,
+                };
+              const cands = candidatesByCategory[catId] || [];
+
+              const rows = cands.map(candidate => {
+                const aCount = stats.audienceTotals[candidate.id] || 0;
+                const jCount = stats.juryTotals[candidate.id] || 0;
+                const aPercent = stats.totalAudience ? aCount / stats.totalAudience : 0;
+                const jPercent = stats.totalJury ? jCount / stats.totalJury : 0;
+                const combined = 0.7 * aPercent + 0.3 * jPercent;
+
+                return {
+                  candidate,
+                  audienceCount: aCount,
+                  juryCount: jCount,
+                  audiencePercent: aPercent,
+                  juryPercent: jPercent,
+                  score: combined,
+                };
+              });
+
+              rows.sort((a, b) => b.score - a.score);
+              resByCategory[catId] = rows;
+              winners[catId] = rows[0] || null;
+            });
+
+            setCategories(categoriesList);
+            setResultsByCategory(resByCategory);
+            setWinnersByCategory(winners);
+          } catch (e) {
+            console.error(e);
+            setError("Не удалось загрузить результаты голосования.");
+          } finally {
+            setLoading(false);
+          }
+        };
+        load();
+      }, []);
+
+      return (
+        <Layout>
+          <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <Pill>Результаты</Pill>
+              <h2 className="mt-3 text-2xl sm:text-3xl font-bold text-slate-50">
+                Победители SCHOOL SLAY AWARDS 2025
+              </h2>
+              <p className="mt-2 max-w-xl text-sm text-slate-400">
+                Итоги считаются по формуле:{" "}
+                <span className="font-semibold text-slate-100">
+                  70% голосов аудитории + 30% голосов жюри
+                </span>
+                . Если в какой‑то номинации нет голосов жюри, их доля считается нулевой.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 text-xs text-slate-300">
+              <p className="font-medium text-slate-100">Как считается результат?</p>
+              <p className="mt-1">
+                Для каждого кандидата считаем долю голосов зрителей и долю голосов жюри в рамках
+                одной номинации. Затем смешиваем: 0.7 × доля зрителей + 0.3 × доля жюри.
+              </p>
+            </div>
+          </div>
+
+          {loading && <LoadingSpinner label="Считаем голоса..." />}
+          {error && (
+            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && categories.length === 0 && (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-8 text-sm text-slate-300">
+              Номинаций ещё нет. Добавьте их в админке, после чего здесь появятся результаты.
+            </div>
+          )}
+
+          <div className="space-y-8">
+            {categories.map(cat => {
+              const winner = winnersByCategory[cat.id];
+              const rows = resultsByCategory[cat.id] || [];
+              const hasVotes = rows.some(r => r.audienceCount > 0 || r.juryCount > 0);
+
+              return (
+                <section
+                  key={cat.id}
+                  className="rounded-3xl border border-slate-800/70 bg-slate-900/70 p-5 sm:p-6"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+                        Номинация
+                      </p>
+                      <h3 className="mt-1 text-lg font-semibold text-slate-50">
+                        {cat.name || "Без названия"}
+                      </h3>
+                      {cat.description && (
+                        <p className="mt-1 max-w-xl text-xs text-slate-400">
+                          {cat.description}
+                        </p>
+                      )}
+                    </div>
+                    {hasVotes && winner && (
+                      <div className="flex items-center gap-3 rounded-2xl border border-amber-400/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-amber-400 text-slate-950 text-lg">
+                          🏆
+                        </span>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.18em] text-amber-200/90">
+                            Победитель
+                          </p>
+                          <p className="text-sm font-semibold text-amber-50">
+                            {winner.candidate.name}
+                          </p>
+                          <p className="text-[11px] text-amber-100/80">
+                            Итоговый балл: {(winner.score * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {!hasVotes && (
+                    <p className="mt-4 text-xs text-slate-400">
+                      Голосов по этой номинации пока нет. Результаты появятся сразу после начала
+                      голосования.
+                    </p>
+                  )}
+
+                  {rows.length > 0 && (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="min-w-full text-left text-xs text-slate-200">
+                        <thead>
+                          <tr className="border-b border-slate-800/80 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                            <th className="py-2 pr-4">Кандидат</th>
+                            <th className="py-2 px-4 text-right">Голоса аудитории</th>
+                            <th className="py-2 px-4 text-right">Голоса жюри</th>
+                            <th className="py-2 px-4 text-right">Итоговый %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row, index) => (
+                            <tr
+                              key={row.candidate.id}
+                              className={classNames(
+                                "border-b border-slate-900/80",
+                                index === 0 ? "bg-fuchsia-500/5" : ""
+                              )}
+                            >
+                              <td className="py-2 pr-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] text-slate-500 w-5">
+                                    {index + 1}.
+                                  </span>
+                                  <div className="h-8 w-8 overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/80 flex-shrink-0">
+                                    {row.candidate.photoUrl ? (
+                                      <img
+                                        src={row.candidate.photoUrl}
+                                        alt={row.candidate.name}
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : null}
+                                  </div>
+                                  <span className="text-sm font-medium text-slate-100">
+                                    {row.candidate.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-2 px-4 text-right text-slate-200">
+                                {row.audienceCount}{" "}
+                                <span className="text-[11px] text-slate-500">
+                                  ({(row.audiencePercent * 100).toFixed(1)}%)
+                                </span>
+                              </td>
+                              <td className="py-2 px-4 text-right text-slate-200">
+                                {row.juryCount}{" "}
+                                <span className="text-[11px] text-slate-500">
+                                  ({(row.juryPercent * 100).toFixed(1)}%)
+                                </span>
+                              </td>
+                              <td className="py-2 px-4 text-right font-semibold text-slate-50">
+                                {(row.score * 100).toFixed(1)}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </Layout>
+      );
+    };
+
+    // --- Admin subcomponents -------------------------------------------------
+    const AdminCategories = () => {
+      const [categories, setCategories] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [form, setForm] = useState({ name: "", description: "", order: "" });
+      const [editingId, setEditingId] = useState(null);
+      const [saving, setSaving] = useState(false);
+
+      const load = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          let ref = db.collection("categories");
+          try {
+            ref = ref.orderBy("order", "asc");
+          } catch (_) {}
+          const snap = await ref.get();
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setCategories(list);
+        } catch (e) {
+          console.error(e);
+          setError("Не удалось загрузить категории.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        load();
+      }, []);
+
+      const startEdit = (cat) => {
+        setEditingId(cat.id);
+        setForm({
+          name: cat.name || "",
+          description: cat.description || "",
+          order: cat.order ?? "",
+        });
+      };
+
+      const resetForm = () => {
+        setEditingId(null);
+        setForm({ name: "", description: "", order: "" });
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!form.name.trim()) return;
+        setSaving(true);
+        try {
+          const payload = {
+            name: form.name.trim(),
+            description: form.description.trim(),
+          };
+          const orderNum = form.order === "" ? null : Number(form.order);
+          if (!Number.isNaN(orderNum) && orderNum !== null) {
+            payload.order = orderNum;
+          }
+
+          if (editingId) {
+            await db.collection("categories").doc(editingId).update(payload);
+          } else {
+            await db.collection("categories").add({
+              ...payload,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+          await load();
+          resetForm();
+        } catch (e) {
+          console.error(e);
+          alert("Ошибка при сохранении категории.");
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const handleDelete = async (id) => {
+        if (!window.confirm("Точно удалить эту категорию?")) return;
+        try {
+          await db.collection("categories").doc(id).delete();
+          await load();
+        } catch (e) {
+          console.error(e);
+          alert("Не удалось удалить категорию.");
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="glass rounded-3xl p-5">
+            <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+              Управление категориями
+            </p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-50">
+              {editingId ? "Редактировать номинацию" : "Создать новую номинацию"}
+            </h3>
+
+            <form onSubmit={handleSubmit} className="mt-4 grid gap-4 md:grid-cols-[2fr,3fr,1fr,auto]">
+              <div className="space-y-1">
+                <label className="text-xs text-slate-300">Название</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                  placeholder="Например: Best Outfit"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-300">Описание</label>
+                <input
+                  type="text"
+                  value={form.description}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                  placeholder="Кратко опишите суть номинации"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-300">Порядок (опц.)</label>
+                <input
+                  type="number"
+                  value={form.order}
+                  onChange={e => setForm({ ...form, order: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                  placeholder="1, 2, 3..."
+                />
+              </div>
+              <div className="flex flex-col justify-end gap-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-sky-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-glow hover:brightness-110 disabled:opacity-60"
+                >
+                  {editingId ? "Сохранить" : "Добавить"}
+                </button>
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="text-[11px] text-slate-400 underline underline-offset-2"
+                  >
+                    Отменить редактирование
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800/70 bg-slate-950/60 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-medium text-slate-300">
+                Текущие номинации ({categories.length})
+              </p>
+              <button
+                onClick={load}
+                className="text-[11px] text-sky-300 hover:text-sky-200 underline underline-offset-2"
+              >
+                Обновить
+              </button>
+            </div>
+            {loading && <p className="text-xs text-slate-400">Загружаем...</p>}
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            {!loading && categories.length === 0 && (
+              <p className="text-xs text-slate-400">Категорий пока нет.</p>
+            )}
+            <div className="mt-2 space-y-2 text-xs">
+              {categories.map(cat => (
+                <div
+                  key={cat.id}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-100">
+                      {cat.name || "Без названия"}{" "}
+                      {cat.order !== undefined && cat.order !== null && (
+                        <span className="text-[11px] text-slate-500">#{cat.order}</span>
+                      )}
+                    </p>
+                    {cat.description && (
+                      <p className="text-[11px] text-slate-400 line-clamp-1">{cat.description}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => startEdit(cat)}
+                      className="rounded-full border border-sky-400/50 px-2 py-1 text-[11px] text-sky-200 hover:bg-sky-500/10"
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      onClick={() => handleDelete(cat.id)}
+                      className="rounded-full border border-red-400/60 px-2 py-1 text-[11px] text-red-200 hover:bg-red-500/10"
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const AdminCandidates = () => {
+      const [categories, setCategories] = useState([]);
+      const [candidates, setCandidates] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [form, setForm] = useState({
+        categoryId: "",
+        name: "",
+        photoUrl: "",
+        description: "",
+      });
+      const [editingId, setEditingId] = useState(null);
+      const [saving, setSaving] = useState(false);
+
+      const load = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const [catSnap, candSnap] = await Promise.all([
+            db.collection("categories").get(),
+            db.collection("candidates").get(),
+          ]);
+          const cats = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const cands = candSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setCategories(cats);
+          setCandidates(cands);
+          if (!form.categoryId && cats[0]) {
+            setForm(f => ({ ...f, categoryId: cats[0].id }));
+          }
+        } catch (e) {
+          console.error(e);
+          setError("Не удалось загрузить данные.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        load();
+      }, []);
+
+      const resetForm = () => {
+        setEditingId(null);
+        setForm({
+          categoryId: categories[0]?.id || "",
+          name: "",
+          photoUrl: "",
+          description: "",
+        });
+      };
+
+      const startEdit = (cand) => {
+        setEditingId(cand.id);
+        setForm({
+          categoryId: cand.categoryId || "",
+          name: cand.name || "",
+          photoUrl: cand.photoUrl || "",
+          description: cand.description || "",
+        });
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!form.name.trim() || !form.categoryId) return;
+        setSaving(true);
+        try {
+          const payload = {
+            categoryId: form.categoryId,
+            name: form.name.trim(),
+            photoUrl: form.photoUrl.trim(),
+            description: form.description.trim(),
+          };
+
+          if (editingId) {
+            await db.collection("candidates").doc(editingId).update(payload);
+          } else {
+            await db.collection("candidates").add({
+              ...payload,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+          await load();
+          resetForm();
+        } catch (e) {
+          console.error(e);
+          alert("Ошибка при сохранении кандидата.");
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const handleDelete = async (id) => {
+        if (!window.confirm("Удалить этого кандидата?")) return;
+        try {
+          await db.collection("candidates").doc(id).delete();
+          await load();
+        } catch (e) {
+          console.error(e);
+          alert("Не удалось удалить кандидата.");
+        }
+      };
+
+      const candidatesByCategory = {};
+      candidates.forEach(c => {
+        const catId = c.categoryId || "unknown";
+        if (!candidatesByCategory[catId]) candidatesByCategory[catId] = [];
+        candidatesByCategory[catId].push(c);
+      });
+
+      return (
+        <div className="space-y-6">
+          <div className="glass rounded-3xl p-5">
+            <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+              Управление кандидатами
+            </p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-50">
+              {editingId ? "Редактировать кандидата" : "Добавить кандидата"}
+            </h3>
+
+            {categories.length === 0 ? (
+              <p className="mt-3 text-xs text-slate-400">
+                Сначала создайте хотя бы одну категорию в соседней вкладке.
+              </p>
+            ) : (
+              <form
+                onSubmit={handleSubmit}
+                className="mt-4 grid gap-4 md:grid-cols-2"
+              >
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-300">Категория</label>
+                  <select
+                    value={form.categoryId}
+                    onChange={e => setForm({ ...form, categoryId: e.target.value })}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                    required
+                  >
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name || "Без названия"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-300">Имя кандидата</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                    placeholder="Имя и фамилия / ник"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-300">URL фотографии</label>
+                  <input
+                    type="url"
+                    value={form.photoUrl}
+                    onChange={e => setForm({ ...form, photoUrl: e.target.value })}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                    placeholder="https://..."
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Используйте прямые ссылки на изображения (Github, Imgur, Google Drive с прямым
+                    доступом и т.п.).
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-300">Описание / подпись</label>
+                  <textarea
+                    rows={3}
+                    value={form.description}
+                    onChange={e => setForm({ ...form, description: e.target.value })}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                    placeholder="Небольшое описание, класс, вайб, титулы..."
+                  />
+                </div>
+                <div className="md:col-span-2 flex items-center justify-between">
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-sky-400 px-5 py-2.5 text-xs font-semibold text-slate-950 shadow-glow hover:brightness-110 disabled:opacity-60"
+                  >
+                    {editingId ? "Сохранить изменения" : "Добавить кандидата"}
+                  </button>
+                  {editingId && (
+                    <button
+                      type="button"
+                      onClick={resetForm}
+                      className="text-[11px] text-slate-400 underline underline-offset-2"
+                    >
+                      Отменить редактирование
+                    </button>
+                  )}
+                </div>
+              </form>
+            )}
+          </div>
+
+          <div className="rounded-3xl border border-slate-800/70 bg-slate-950/60 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-medium text-slate-300">
+                Все кандидаты ({candidates.length})
+              </p>
+              <button
+                onClick={load}
+                className="text-[11px] text-sky-300 hover:text-sky-200 underline underline-offset-2"
+              >
+                Обновить
+              </button>
+            </div>
+            {loading && <p className="text-xs text-slate-400">Загружаем...</p>}
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            {!loading && candidates.length === 0 && (
+              <p className="text-xs text-slate-400">Кандидатов пока нет.</p>
+            )}
+
+            <div className="mt-2 space-y-4 text-xs">
+              {categories.map(cat => {
+                const list = candidatesByCategory[cat.id] || [];
+                if (list.length === 0) return null;
+                return (
+                  <div key={cat.id} className="space-y-2">
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                      {cat.name}
+                    </p>
+                    <div className="space-y-2">
+                      {list.map(cand => (
+                        <div
+                          key={cand.id}
+                          className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-3 py-2"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="h-8 w-8 overflow-hidden rounded-xl border border-slate-800 bg-slate-900 flex-shrink-0">
+                              {cand.photoUrl ? (
+                                <img
+                                  src={cand.photoUrl}
+                                  alt={cand.name}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : null}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-slate-100">
+                                {cand.name || "Без имени"}
+                              </p>
+                              {cand.description && (
+                                <p className="text-[11px] text-slate-400 line-clamp-1">
+                                  {cand.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => startEdit(cand)}
+                              className="rounded-full border border-sky-400/50 px-2 py-1 text-[11px] text-sky-200 hover:bg-sky-500/10"
+                            >
+                              Редактировать
+                            </button>
+                            <button
+                              onClick={() => handleDelete(cand.id)}
+                              className="rounded-full border border-red-400/60 px-2 py-1 text-[11px] text-red-200 hover:bg-red-500/10"
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const randomChunk = (length) => {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let out = "";
+      for (let i = 0; i < length; i++) {
+        out += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return out;
+    };
+
+    const AdminCodes = () => {
+      const [categories, setCategories] = useState([]);
+      const [form, setForm] = useState({
+        type: "audience",
+        quantity: 20,
+        prefix: "SLAY",
+        categoryId: "",
+      });
+      const [generatedCodes, setGeneratedCodes] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [recentCodes, setRecentCodes] = useState([]);
+      const [loadingRecent, setLoadingRecent] = useState(true);
+
+      useEffect(() => {
+        const loadCats = async () => {
+          try {
+            const snap = await db.collection("categories").get();
+            const cats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setCategories(cats);
+          } catch (e) {
+            console.error(e);
+          }
+        };
+        const loadRecent = async () => {
+          setLoadingRecent(true);
+          try {
+            const snap = await db
+              .collection("codes")
+              .orderBy("createdAt", "desc")
+              .limit(50)
+              .get();
+            const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setRecentCodes(list);
+          } catch (e) {
+            console.error(e);
+          } finally {
+            setLoadingRecent(false);
+          }
+        };
+        loadCats();
+        loadRecent();
+      }, []);
+
+      const handleGenerate = async (e) => {
+        e.preventDefault();
+        const qty = Number(form.quantity);
+        if (!qty || qty <= 0 || qty > 500) {
+          alert("Введите количество от 1 до 500.");
+          return;
+        }
+        setLoading(true);
+        try {
+          const batch = db.batch();
+          const codesArr = [];
+          for (let i = 0; i < qty; i++) {
+            const code =
+              (form.prefix || "SLAY") +
+              "-" +
+              randomChunk(4) +
+              "-" +
+              randomChunk(4);
+            const ref = db.collection("codes").doc();
+            batch.set(ref, {
+              code,
+              type: form.type,
+              categoryId: form.categoryId || null,
+              used: false,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            });
+            codesArr.push(code);
+          }
+          await batch.commit();
+          setGeneratedCodes(codesArr);
+          // reload recent
+          const snap = await db
+            .collection("codes")
+            .orderBy("createdAt", "desc")
+            .limit(50)
+            .get();
+          setRecentCodes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } catch (e) {
+          console.error(e);
+          alert("Ошибка при генерации кодов.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="glass rounded-3xl p-5">
+            <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+              Генерация кодов
+            </p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-50">
+              Создать коды голосования
+            </h3>
+            <p className="mt-1 text-xs text-slate-400">
+              Каждый код может быть использован строго один раз. Вы можете пометить часть кодов как
+              <span className="text-emerald-200"> jury</span> — они будут учитываться как голоса
+              жюри.
+            </p>
+
+            <form
+              onSubmit={handleGenerate}
+              className="mt-4 grid gap-4 md:grid-cols-[1.5fr,1fr,1.5fr,auto]"
+            >
+              <div className="space-y-2">
+                <label className="text-xs text-slate-300">Тип кодов</label>
+                <select
+                  value={form.type}
+                  onChange={e => setForm({ ...form, type: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                >
+                  <option value="audience">Аудитория (70%)</option>
+                  <option value="jury">Жюри (30%)</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-slate-300">Количество</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={form.quantity}
+                  onChange={e => setForm({ ...form, quantity: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-slate-300">
+                  Префикс / привязка к категории (опц.)
+                </label>
+                <div className="grid grid-cols-[1.2fr,1.8fr] gap-2">
+                  <input
+                    type="text"
+                    value={form.prefix}
+                    onChange={e => setForm({ ...form, prefix: e.target.value.toUpperCase() })}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                    placeholder="SLAY"
+                  />
+                  <select
+                    value={form.categoryId}
+                    onChange={e => setForm({ ...form, categoryId: e.target.value })}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-500/60"
+                  >
+                    <option value="">Без привязки</option>
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Если указать категорию, код можно будет использовать только в ней.
+                </p>
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-sky-400 px-5 py-2.5 text-xs font-semibold text-slate-950 shadow-glow hover:brightness-110 disabled:opacity-60"
+                >
+                  {loading ? "Генерируем..." : "Сгенерировать"}
+                </button>
+              </div>
+            </form>
+
+            {generatedCodes.length > 0 && (
+              <div className="mt-4 rounded-2xl border border-emerald-400/60 bg-emerald-500/10 p-3 text-xs text-emerald-50">
+                <p className="font-medium">Новые коды ({generatedCodes.length})</p>
+                <p className="mt-1 text-[11px] text-emerald-100/80">
+                  Скопируйте и раздайте участникам. Они также сохранены в Firestore (коллекция
+                  <span className="font-mono"> codes</span>).
+                </p>
+                <textarea
+                  readOnly
+                  className="mt-2 h-32 w-full rounded-xl border border-emerald-300/60 bg-slate-950/80 p-2 text-[11px] font-mono text-emerald-100"
+                  value={generatedCodes.join("\n")}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-3xl border border-slate-800/70 bg-slate-950/60 p-4 text-xs">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium text-slate-300">
+                Последние 50 кодов
+              </p>
+              <button
+                onClick={async () => {
+                  setLoadingRecent(true);
+                  try {
+                    const snap = await db
+                      .collection("codes")
+                      .orderBy("createdAt", "desc")
+                      .limit(50)
+                      .get();
+                    setRecentCodes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setLoadingRecent(false);
+                  }
+                }}
+                className="text-[11px] text-sky-300 hover:text-sky-200 underline underline-offset-2"
+              >
+                Обновить
+              </button>
+            </div>
+            {loadingRecent && <p className="text-slate-400">Загружаем...</p>}
+            {!loadingRecent && recentCodes.length === 0 && (
+              <p className="text-slate-400">Кодов пока нет.</p>
+            )}
+            <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+              {recentCodes.map(c => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={classNames(
+                        "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                        c.type === "jury"
+                          ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/60"
+                          : "bg-fuchsia-500/15 text-fuchsia-200 border border-fuchsia-400/60"
+                      )}
+                    >
+                      {c.type === "jury" ? "Жюри" : "Аудитория"}
+                    </span>
+                    <span className="font-mono text-[11px] text-slate-100">{c.code}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                    {c.categoryId && (
+                      <span className="rounded-full border border-slate-600 px-2 py-0.5">
+                        cat: {c.categoryId.slice(0, 6)}…
+                      </span>
+                    )}
+                    {c.used && (
+                      <span className="rounded-full border border-emerald-500/60 bg-emerald-500/10 px-2 py-0.5 text-emerald-100">
+                        Использован
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const AdminVotes = () => {
+      const [votes, setVotes] = useState([]);
+      const [categories, setCategories] = useState({});
+      const [candidates, setCandidates] = useState({});
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      const load = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const [catSnap, candSnap, votesSnap] = await Promise.all([
+            db.collection("categories").get(),
+            db.collection("candidates").get(),
+            db.collection("votes").orderBy("createdAt", "desc").limit(100).get(),
+          ]);
+
+          const cats = {};
+          catSnap.docs.forEach(d => { cats[d.id] = { id: d.id, ...d.data() }; });
+          const cands = {};
+          candSnap.docs.forEach(d => { cands[d.id] = { id: d.id, ...d.data() }; });
+          const vt = votesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+          setCategories(cats);
+          setCandidates(cands);
+          setVotes(vt);
+        } catch (e) {
+          console.error(e);
+          setError("Не удалось загрузить голоса.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        load();
+      }, []);
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.26em] text-slate-400">
+                Голоса
+              </p>
+              <h3 className="mt-1 text-lg font-semibold text-slate-50">
+                Последние 100 голосов
+              </h3>
+            </div>
+            <button
+              onClick={load}
+              className="rounded-full border border-sky-400/60 px-4 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/10"
+            >
+              Обновить
+            </button>
+          </div>
+
+          {loading && <p className="text-xs text-slate-400">Загружаем...</p>}
+          {error && <p className="text-xs text-red-300">{error}</p>}
+          {!loading && votes.length === 0 && (
+            <p className="text-xs text-slate-400">
+              Голосов пока нет. Как только первые коды будут использованы, они появятся здесь.
+            </p>
+          )}
+
+          <div className="max-h-[420px] overflow-y-auto rounded-3xl border border-slate-800/70 bg-slate-950/60 text-xs">
+            <table className="min-w-full text-left">
+              <thead className="sticky top-0 bg-slate-950/90">
+                <tr className="border-b border-slate-800/80 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                  <th className="px-3 py-2">Время</th>
+                  <th className="px-3 py-2">Тип</th>
+                  <th className="px-3 py-2">Категория</th>
+                  <th className="px-3 py-2">Кандидат</th>
+                  <th className="px-3 py-2">Код</th>
+                </tr>
+              </thead>
+              <tbody>
+                {votes.map(v => {
+                  const cat = categories[v.categoryId];
+                  const cand = candidates[v.candidateId];
+                  const ts = v.createdAt?.toDate
+                    ? v.createdAt.toDate()
+                    : null;
+                  const timeStr = ts
+                    ? ts.toLocaleString("ru-RU", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "–";
+                  return (
+                    <tr key={v.id} className="border-b border-slate-900/80">
+                      <td className="px-3 py-1.5 text-slate-400">{timeStr}</td>
+                      <td className="px-3 py-1.5">
+                        <span
+                          className={classNames(
+                            "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                            v.type === "jury"
+                              ? "bg-emerald-500/15 text-emerald-200 border border-emerald-400/60"
+                              : "bg-fuchsia-500/15 text-fuchsia-200 border border-fuchsia-400/60"
+                          )}
+                        >
+                          {v.type === "jury" ? "Жюри" : "Аудитория"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-slate-100">
+                        {cat?.name || v.categoryId || "—"}
+                      </td>
+                      <td className="px-3 py-1.5 text-slate-100">
+                        {cand?.name || v.candidateId || "—"}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-[11px] text-slate-400">
+                        {v.code}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    };
+
+    const AdminPage = () => {
+      const [isAuthed, setIsAuthed] = useState(() => {
+        return window.localStorage.getItem("slay_admin_ok") === "1";
+      });
+      const [password, setPassword] = useState("");
+      const [error, setError] = useState(null);
+      const [activeTab, setActiveTab] = useState("categories");
+
+      const handleLogin = (e) => {
+        e.preventDefault();
+        if (password === ADMIN_PASSWORD) {
+          setIsAuthed(true);
+          setError(null);
+          window.localStorage.setItem("slay_admin_ok", "1");
+        } else {
+          setError("Неверный пароль администратора.");
+        }
+      };
+
+      if (!isAuthed) {
+        return (
+          <Layout>
+            <div className="mx-auto max-w-md glass rounded-3xl p-6">
+              <Pill>Админ-панель</Pill>
+              <h2 className="mt-3 text-xl font-semibold text-slate-50">
+                Вход для организаторов
+              </h2>
+              <p className="mt-2 text-xs text-slate-400">
+                Для прототипа используется простой пароль, зашитый в коде фронтенда. Перед боевым
+                запуском обязательно{" "}
+                <span className="font-semibold text-slate-100">
+                  замените его и подключите полноценную авторизацию (Firebase Auth).
+                </span>
+              </p>
+              <form onSubmit={handleLogin} className="mt-4 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-300">Пароль администратора</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-700/80 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-sky-400 focus:ring-1 focus:ring-sky-500/60"
+                    placeholder="Введите пароль"
+                  />
+                </div>
+                {error && (
+                  <div className="rounded-2xl border border-red-400/60 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                    {error}
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  className="inline-flex w-full items-center justify-center rounded-full bg-gradient-to-r from-sky-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-glow hover:brightness-110"
+                >
+                  Войти в админку
+                </button>
+              </form>
+            </div>
+          </Layout>
+        );
+      }
+
+      return (
+        <Layout>
+          <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <Pill>Админ-панель</Pill>
+              <h2 className="mt-3 text-2xl font-bold text-slate-50">
+                Настройки SCHOOL SLAY AWARD 2025
+              </h2>
+              <p className="mt-1 text-xs text-slate-400 max-w-xl">
+                Управляйте номинациями, кандидатами, кодами голосования и отслеживайте голоса в
+                реальном времени. Все изменения сразу уходят в Firestore.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                window.localStorage.removeItem("slay_admin_ok");
+                window.location.reload();
+              }}
+              className="self-start rounded-full border border-slate-700/80 bg-slate-950/80 px-4 py-2 text-xs font-medium text-slate-300 hover:border-red-400 hover:text-red-200 hover:bg-red-500/10"
+            >
+              Выйти
+            </button>
+          </div>
+
+          <div className="mb-5 inline-flex rounded-full border border-slate-800 bg-slate-950/60 p-1 text-xs">
+            {[
+              { id: "categories", label: "Категории" },
+              { id: "candidates", label: "Кандидаты" },
+              { id: "codes", label: "Коды голосования" },
+              { id: "votes", label: "Голоса" },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={classNames(
+                  "rounded-full px-3 py-1.5 font-medium transition",
+                  activeTab === tab.id
+                    ? "bg-sky-500 text-slate-950"
+                    : "text-slate-300 hover:text-white"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-6">
+            {activeTab === "categories" && <AdminCategories />}
+            {activeTab === "candidates" && <AdminCandidates />}
+            {activeTab === "codes" && <AdminCodes />}
+            {activeTab === "votes" && <AdminVotes />}
+          </div>
+        </Layout>
+      );
+    };
+
+    // --- Root SPA ------------------------------------------------------------
+    const App = () => (
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/categories" element={<CategoriesPage />} />
+          <Route path="/categories/:categoryId" element={<CategoryDetailPage />} />
+          <Route path="/results" element={<ResultsPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route
+            path="*"
+            element={
+              <Layout>
+                <div className="mx-auto max-w-md rounded-3xl border border-slate-800 bg-slate-900/70 p-6 text-sm text-slate-200">
+                  <p className="text-lg font-semibold text-slate-50">Страница не найдена</p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Такой страницы нет в SCHOOL SLAY. Возможно, вы перешли по старой ссылке.
+                  </p>
+                  <div className="mt-4 flex gap-2">
+                    <Link
+                      to="/"
+                      className="inline-flex flex-1 items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-sky-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-glow hover:brightness-110"
+                    >
+                      На главную
+                    </Link>
+                    <Link
+                      to="/categories"
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-slate-700/80 bg-slate-950/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 hover:bg-slate-800"
+                    >
+                      К номинациям
+                    </Link>
+                  </div>
+                </div>
+              </Layout>
+            }
+          />
+        </Routes>
+      </HashRouter>
+    );
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
