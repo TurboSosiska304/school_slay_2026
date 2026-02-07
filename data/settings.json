@@ -4,7 +4,7 @@
   "anti_abuse_enabled": true,
   "header": {
     "show_logo": true,
-    "logo_path": "win.png"
+    "logo_path": "/assets/win.png"
   },
   "footer": {
     "logo_url": "",
