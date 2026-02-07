@@ -1,0 +1,20 @@
+{
+  "title": "11A - 2026",
+  "is_voting_active": true,
+  "anti_abuse_enabled": true,
+  "header": {
+    "show_logo": true,
+    "logo_path": "win.png"
+  },
+  "footer": {
+    "logo_url": "",
+    "description": "Платформа построена в юмористических целях.\nНе является государственным порталом!",
+    "copyright": "© 2025 City Voting Platform",
+    "links": [
+      {
+        "label": "Github",
+        "url": "https://github.com/TurboSosiska304"
+      }
+    ]
+  }
+}

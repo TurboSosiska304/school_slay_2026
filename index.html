@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11А-2026</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #050505; color: #e5e5e5; }
+        h1, h2, h3 { font-family: 'Playfair Display', serif; }
+        .gold-text { background: linear-gradient(to right, #bf953f, #fcf6ba, #b38728); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .gold-bg { background: linear-gradient(135deg, #bf953f, #b38728); }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .card-shadow { box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .admin-glass { background: rgba(10, 10, 10, 0.98); border-left: 1px solid rgba(191, 149, 63, 0.3); }
+        input, textarea, select { background: rgba(0,0,0,0.5) !important; border: 1px solid rgba(255,255,255,0.1) !important; color: white !important; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #bf953f; border-radius: 10px; }
+        .fade-in { animation: fadeIn 1.5s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const API_URL = "https://api.zerotwo.ru"; 
+
+        const Spinner = () => <div className="flex justify-center p-4"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-yellow-500"></div></div>;
+
+        // --- ADMIN COMPONENTS ---
+        const AdminPanel = ({ token, onLogout, refreshApp }) => {
+            const [data, setData] = useState(null);
+            const [activeTab, setActiveTab] = useState('settings');
+
+            useEffect(() => {
+                fetch(`${API_URL}/api/admin/data`, { headers: { 'x-admin-token': token } })
+                    .then(r => r.json())
+                    .then(res => {
+                        // Инициализация структуры, если её нет
+                        if (!res.settings.footer) {
+                            res.settings.footer = { logo_url: "", description: "Официальное народное голосование города.", copyright: "© 2025 City Voting Platform", links: [] };
+                        }
+                        if (!res.settings.header) {
+                            res.settings.header = { show_logo: true, logo_path: "win.png" };
+                        }
+                        setData(res);
+                    });
+            }, []);
+
+            const save = async (path, body) => {
+                const res = await fetch(`${API_URL}/api/admin/${path}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-token': token },
+                    body: JSON.stringify(body)
+                });
+                if (res.ok) {
+                    alert("Успешно сохранено");
+                    refreshApp();
+                }
+            };
+
+            const addFooterLink = () => {
+                const newSettings = {...data.settings};
+                newSettings.footer.links.push({ label: "Telegram", url: "#" });
+                setData({...data, settings: newSettings});
+            };
+
+            const removeFooterLink = (idx) => {
+                const newSettings = {...data.settings};
+                newSettings.footer.links = newSettings.footer.links.filter((_, i) => i !== idx);
+                setData({...data, settings: newSettings});
+            };
+
+            const addCategory = () => {
+                const newCat = { id: `cat_${Date.now()}`, title: "Новая категория", max_votes: 1, participants: [] };
+                setData({...data, categories: [...data.categories, newCat]});
+            };
+
+            const addParticipant = (catIdx) => {
+                const newPart = { id: `p_${Date.now()}`, name: "Новый участник", description: "", image_url: "https://placehold.co/400x600/1a1a1a/gold?text=Photo" };
+                const newCats = [...data.categories];
+                newCats[catIdx].participants.push(newPart);
+                setData({...data, categories: newCats});
+            };
+
+            if (!data) return <div className="fixed inset-0 bg-black flex items-center justify-center z-[100]"><Spinner /></div>;
+
+            return (
+                <div className="fixed inset-0 z-50 admin-glass overflow-y-auto p-4 md:p-10 text-white pb-32">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="flex justify-between items-center mb-10 border-b border-white/10 pb-6">
+                            <div>
+                                <h2 className="text-3xl font-bold gold-text">Панель управления</h2>
+                            </div>
+                            <div className="flex gap-4">
+                                <button onClick={() => { save('settings', data.settings); save('categories', data.categories); }} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold transition-colors">Сохранить всё</button>
+                                <button onClick={onLogout} className="bg-white/5 hover:bg-red-900/40 px-4 py-2 rounded-lg transition-colors border border-white/10">Выйти</button>
+                            </div>
+                        </div>
+                        
+                        <div className="flex gap-4 mb-8 overflow-x-auto pb-2">
+                            {['settings', 'categories', 'footer'].map(t => (
+                                <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-3 rounded-xl transition-all whitespace-nowrap ${activeTab === t ? 'gold-bg text-black font-bold scale-105 shadow-lg shadow-yellow-500/20' : 'bg-white/5 hover:bg-white/10 border border-white/10'}`}>
+                                    {t === 'settings' ? '⚙️ Настройки' : t === 'categories' ? '🏆 Категории' : '📄 Футер'}
+                                </button>
+                            ))}
+                        </div>
+
+                        {activeTab === 'settings' && (
+                            <div className="glass p-8 rounded-3xl space-y-8">
+                                <section className="space-y-4">
+                                    <h3 className="text-lg font-bold gold-text">Основные настройки</h3>
+                                    <div>
+                                        <label className="block mb-2 text-sm text-gray-400">Название события</label>
+                                        <input value={data.settings.title} onChange={e => setData({...data, settings: {...data.settings, title: e.target.value}})} className="w-full p-4 rounded-xl outline-none" />
+                                    </div>
+                                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                                        <span>Голосование активно</span>
+                                        <input type="checkbox" checked={data.settings.is_voting_active} onChange={e => setData({...data, settings: {...data.settings, is_voting_active: e.target.checked}})} className="w-6 h-6 accent-yellow-500" />
+                                    </div>
+                                </section>
+
+                                <section className="space-y-4 border-t border-white/5 pt-6">
+                                    <h3 className="text-lg font-bold gold-text">Шапка (Header)</h3>
+                                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                                        <div>
+                                            <p className="font-semibold">Главный логотип (win.png)</p>
+                                            <p className="text-xs text-gray-400">Отображать изображение над заголовком</p>
+                                        </div>
+                                        <input type="checkbox" checked={data.settings.header?.show_logo} onChange={e => setData({...data, settings: {...data.settings, header: {...data.settings.header, show_logo: e.target.checked}}})} className="w-6 h-6 accent-yellow-500" />
+                                    </div>
+                                </section>
+                            </div>
+                        )}
+
+                        {activeTab === 'categories' && (
+                            <div className="space-y-10">
+                                {data.categories.map((cat, idx) => (
+                                    <div key={cat.id} className="glass p-8 rounded-3xl border-l-4 border-yellow-500 relative">
+                                        <button onClick={() => { if(confirm("Удалить?")) setData({...data, categories: data.categories.filter((_, i) => i !== idx)})}} className="absolute top-8 right-8 text-red-500">Удалить</button>
+                                        <input value={cat.title} onChange={e => {
+                                            const c = [...data.categories];
+                                            c[idx].title = e.target.value;
+                                            setData({...data, categories: c});
+                                        }} className="w-full text-2xl font-bold gold-text p-2 rounded bg-transparent mb-6" />
+                                        
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {cat.participants.map((p, pIdx) => (
+                                                <div key={p.id} className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-2">
+                                                    <input value={p.name} placeholder="Имя" onChange={e => {
+                                                        const c = [...data.categories];
+                                                        c[idx].participants[pIdx].name = e.target.value;
+                                                        setData({...data, categories: c});
+                                                    }} className="w-full p-2 text-sm" />
+                                                    <input value={p.image_url} placeholder="URL фото" onChange={e => {
+                                                        const c = [...data.categories];
+                                                        c[idx].participants[pIdx].image_url = e.target.value;
+                                                        setData({...data, categories: c});
+                                                    }} className="w-full p-2 text-xs" />
+                                                    <button onClick={() => {
+                                                        const c = [...data.categories];
+                                                        c[idx].participants = c[idx].participants.filter((_, i) => i !== pIdx);
+                                                        setData({...data, categories: c});
+                                                    }} className="text-xs text-red-400">Удалить участника</button>
+                                                </div>
+                                            ))}
+                                            <button onClick={() => addParticipant(idx)} className="border-2 border-dashed border-white/10 rounded-2xl p-4 text-xs">+ Добавить участника</button>
+                                        </div>
+                                    </div>
+                                ))}
+                                <button onClick={addCategory} className="w-full border-2 border-dashed border-yellow-500/30 p-8 rounded-3xl text-yellow-500 font-bold">НОВАЯ КАТЕГОРИЯ</button>
+                            </div>
+                        )}
+
+                        {activeTab === 'footer' && (
+                            <div className="glass p-8 rounded-3xl space-y-6">
+                                <h3 className="text-xl font-bold gold-text mb-4">Настройка нижнего блока (Футера)</h3>
+                                <div className="grid md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block mb-2 text-sm text-gray-400">URL Логотипа</label>
+                                        <input value={data.settings.footer?.logo_url || ""} onChange={e => setData({...data, settings: {...data.settings, footer: {...data.settings.footer, logo_url: e.target.value}}})} className="w-full p-3 rounded-lg" placeholder="https://..." />
+                                    </div>
+                                    <div>
+                                        <label className="block mb-2 text-sm text-gray-400">Copyright текст</label>
+                                        <input value={data.settings.footer?.copyright || ""} onChange={e => setData({...data, settings: {...data.settings, footer: {...data.settings.footer, copyright: e.target.value}}})} className="w-full p-3 rounded-lg" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block mb-2 text-sm text-gray-400">Описание в футере</label>
+                                    <textarea value={data.settings.footer?.description || ""} onChange={e => setData({...data, settings: {...data.settings, footer: {...data.settings.footer, description: e.target.value}}})} className="w-full p-3 rounded-lg h-24 resize-none" />
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <h4 className="font-bold">Ссылки и соцсети</h4>
+                                        <button onClick={addFooterLink} className="text-xs gold-text">+ Добавить ссылку</button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {(data.settings.footer?.links || []).map((link, lIdx) => (
+                                            <div key={lIdx} className="bg-white/5 p-4 rounded-xl border border-white/10 flex gap-2 items-center">
+                                                <input value={link.label} placeholder="Текст" onChange={e => {
+                                                    const s = {...data.settings};
+                                                    s.footer.links[lIdx].label = e.target.value;
+                                                    setData({...data, settings: s});
+                                                }} className="w-1/3 p-2 text-xs" />
+                                                <input value={link.url} placeholder="URL" onChange={e => {
+                                                    const s = {...data.settings};
+                                                    s.footer.links[lIdx].url = e.target.value;
+                                                    setData({...data, settings: s});
+                                                }} className="w-full p-2 text-xs" />
+                                                <button onClick={() => removeFooterLink(lIdx)} className="text-red-500 px-2">X</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- PUBLIC APP ---
+        const CategoryView = ({ cat, myVotes, settings, results, onVote, onReset }) => {
+            const votesCount = myVotes[cat.id]?.length || 0;
+            const limit = cat.max_votes || 1;
+
+            return (
+                <div className="glass p-4 md:p-6 rounded-3xl flex flex-col h-full card-shadow border border-white/5 hover:border-white/10 transition-all">
+                    <div className="mb-4">
+                        <div className="flex justify-between items-start">
+                            <h3 className="text-xl md:text-2xl font-bold gold-text leading-tight">{cat.title}</h3>
+                            {settings.is_voting_active && votesCount > 0 && (
+                                <button onClick={() => onReset(cat.id)} className="text-[9px] uppercase font-bold text-red-400 border border-red-900/30 px-2 py-1 rounded-lg">Сброс</button>
+                            )}
+                        </div>
+                    </div>
+                    <div className="space-y-4 flex-grow">
+                        {cat.participants.map(p => {
+                            const isVoted = myVotes[cat.id]?.includes(p.id);
+                            const canVote = votesCount < limit || isVoted;
+                            let percent = 0;
+                            let isWinner = false;
+                            if (!settings.is_voting_active && results.visible && results.data[cat.id]) {
+                                const total = Object.values(results.data[cat.id]).reduce((a, b) => a + b, 0);
+                                const count = results.data[cat.id][p.id] || 0;
+                                percent = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+                                isWinner = count === Math.max(...Object.values(results.data[cat.id])) && count > 0;
+                            }
+                            return (
+                                <div key={p.id} className={`relative p-3 rounded-2xl border transition-all ${isVoted ? 'bg-yellow-500/10 border-yellow-500/50' : 'border-white/5'}`}>
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-gray-900">
+                                            <img src={p.image_url} alt="" className="w-full h-full object-cover" />
+                                        </div>
+                                        <div className="flex-grow min-w-0">
+                                            <p className="text-sm font-bold truncate">{p.name}</p>
+                                            {!settings.is_voting_active && results.visible && (
+                                                <div className="w-full bg-white/5 h-1 rounded-full mt-2 overflow-hidden">
+                                                    <div className={`h-full ${isWinner ? 'bg-yellow-500' : 'bg-gray-600'}`} style={{width: `${percent}%`}}></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex-shrink-0">
+                                            {settings.is_voting_active ? (
+                                                <button onClick={() => !isVoted && canVote && onVote(cat.id, p.id)} disabled={!canVote || isVoted} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isVoted ? 'bg-green-500' : canVote ? 'bg-white/5 hover:bg-yellow-500 hover:text-black' : 'opacity-10'}`}>
+                                                    <span className="text-lg font-black">{isVoted ? '✓' : '+'}</span>
+                                                </button>
+                                            ) : (
+                                                <span className={`text-xs font-black ${isWinner ? 'text-yellow-500' : 'text-gray-500'}`}>{percent}%</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('home');
+            const [data, setData] = useState({ categories: [], settings: null, myVotes: {}, results: { visible: false } });
+            const [loading, setLoading] = useState(true);
+            const [adminToken, setAdminToken] = useState(localStorage.getItem('admin_token'));
+
+            const loadData = async () => {
+                try {
+                    const [st, cats, mVotes, res] = await Promise.all([
+                        fetch(`${API_URL}/api/status`).then(r => r.json()),
+                        fetch(`${API_URL}/api/categories`).then(r => r.json()),
+                        fetch(`${API_URL}/api/my-votes`).then(r => r.json()),
+                        fetch(`${API_URL}/api/results`).then(r => r.json())
+                    ]);
+                    setData({ settings: st, categories: cats, myVotes: mVotes, results: res });
+                } catch (e) { console.error(e); }
+                setLoading(false);
+            };
+
+            useEffect(() => { loadData(); }, []);
+
+            const handleVote = async (catId, pId) => {
+                const prev = data.myVotes;
+                const nextVotes = { ...data.myVotes, [catId]: [...(data.myVotes[catId] || []), pId] };
+                setData({ ...data, myVotes: nextVotes });
+                try {
+                    const res = await fetch(`${API_URL}/api/vote`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ category_id: catId, participant_id: pId })
+                    });
+                    if (!res.ok) throw new Error();
+                } catch { setData({ ...data, myVotes: prev }); }
+            };
+
+            const handleReset = async (catId) => {
+                const res = await fetch(`${API_URL}/api/vote/reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category_id: catId })
+                });
+                if (res.ok) {
+                    const next = { ...data.myVotes };
+                    delete next[catId];
+                    setData({ ...data, myVotes: next });
+                }
+            };
+
+            if (loading) return <div className="h-screen flex items-center justify-center bg-black"><Spinner /></div>;
+
+            const header = data.settings?.header || { show_logo: true, logo_path: "win.png" };
+            const footer = data.settings?.footer || {};
+
+            return (
+                <div className="min-h-screen pb-0 selection:bg-yellow-500/30">
+                    {view === 'admin' && adminToken && (
+                        <AdminPanel token={adminToken} onLogout={() => { setAdminToken(null); localStorage.removeItem('admin_token'); setView('home'); }} refreshApp={loadData} />
+                    )}
+
+                    <header className="pt-16 pb-12 md:pt-24 md:pb-24 text-center px-4 relative">
+                        {header.show_logo && (
+                            <div className="mb-6 flex justify-center fade-in">
+                                <img src={header.logo_path} alt="Award Logo" className="w-60 h-30 md:w-60 md:h-30 object-contain drop-shadow-[0_0_15px_rgba(191,149,63,0.3)]" />
+                            </div>
+                        )}
+                        <h1 className="text-5xl md:text-8xl font-bold gold-text mb-4 uppercase tracking-tighter drop-shadow-2xl fade-in">
+                            {data.settings?.title}
+                        </h1>
+                        <p className="text-gray-500 uppercase tracking-[0.3em] text-[10px] md:text-xs font-bold italic fade-in" style={{animationDelay: '0.2s'}}>
+                            Твой голос может решить всё!
+                        </p>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-4 md:px-8 mb-32">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
+                            {data.categories.map(cat => (
+                                <CategoryView key={cat.id} cat={cat} myVotes={data.myVotes} settings={data.settings} results={data.results} onVote={handleVote} onReset={handleReset} />
+                            ))}
+                        </div>
+                    </main>
+
+                    <footer className="bg-black/80 border-t border-white/5 pt-20 pb-10 px-6">
+                        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12 mb-16">
+                            <div className="space-y-6 text-center md:text-left">
+                                {footer.logo_url && <img src={footer.logo_url} className="h-12 mx-auto md:mx-0 object-contain" alt="Footer Logo" />}
+                                <p className="text-gray-400 text-sm max-w-sm mx-auto md:mx-0 leading-relaxed">
+                                    {footer.description || "Официальная платформа голосования."}
+                                </p>
+                            </div>
+                            <div className="flex flex-col items-center justify-center gap-4">
+                                <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Навигация и соцсети</h4>
+                                <div className="flex flex-wrap justify-center gap-4">
+                                    {(footer.links || []).map((link, idx) => (
+                                        <a key={idx} href={link.url} target="_blank" className="text-sm gold-text hover:brightness-125 transition-all underline underline-offset-4 decoration-yellow-500/30">
+                                            {link.label}
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex flex-col items-center md:items-end justify-center gap-4">
+                                <button onClick={() => {
+                                    const pass = prompt("Пароль:");
+                                    fetch(`${API_URL}/api/admin/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pass}) })
+                                        .then(r => r.json()).then(res => {
+                                            if(res.token) { setAdminToken(res.token); localStorage.setItem('admin_token', res.token); setView('admin'); }
+                                        });
+                                }} className="px-6 py-2 rounded-full border border-white/10 text-[10px] uppercase font-bold text-gray-500 hover:text-yellow-500 hover:border-yellow-500/50 transition-all">
+                                    Admin Access
+                                </button>
+                                <p className="text-[10px] text-gray-700 tracking-wider">SECURE VOTING SYSTEM v2.1</p>
+                            </div>
+                        </div>
+                        <div className="text-center border-t border-white/5 pt-8">
+                            <p className="text-gray-600 text-[10px] uppercase tracking-[0.2em]">
+                                {footer.copyright || "© 2025 City Voting Platform"}
+                            </p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

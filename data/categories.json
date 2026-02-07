@@ -1,0 +1,126 @@
+[
+  {
+    "id": "cat_1766440636395",
+    "title": "РазРаз",
+    "max_votes": 1,
+    "participants": [
+      {
+        "id": "p_1766440648651",
+        "name": "Ne pervii",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440655299",
+        "name": "Ne vtoroi",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440659563",
+        "name": "Ne tretii",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440663339",
+        "name": "Ne chetvertii",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      }
+    ]
+  },
+  {
+    "id": "cat_1766440667683",
+    "title": "Второй",
+    "max_votes": 1,
+    "participants": [
+      {
+        "id": "p_1766440677563",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440678307",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440679243",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440679691",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      }
+    ]
+  },
+  {
+    "id": "cat_1766440680691",
+    "title": "Новая категория",
+    "max_votes": 1,
+    "participants": [
+      {
+        "id": "p_1766440682115",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440682587",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440683171",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440683603",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      }
+    ]
+  },
+  {
+    "id": "cat_1766440684691",
+    "title": "Новая категория",
+    "max_votes": 1,
+    "participants": [
+      {
+        "id": "p_1766440686211",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440686667",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440687555",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      },
+      {
+        "id": "p_1766440688019",
+        "name": "Новый участник",
+        "description": "",
+        "image_url": "https://placehold.co/400x600/1a1a1a/gold?text=Photo"
+      }
+    ]
+  }
+]
