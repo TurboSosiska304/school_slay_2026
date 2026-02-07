@@ -1,6 +1,5 @@
 import os
 import json
-import asyncio
 import hashlib
 import logging
 import socket
@@ -8,7 +7,6 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
@@ -16,7 +14,8 @@ import threading
 
 # --- КОНФИГУРАЦИЯ И ЛОГИРОВАНИЕ ---
 DATA_DIR = "data"
-ADMIN_PASSWORD_HASH = os.getenv("ADMIN_HASH", "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92")
+PASSWORD_FILE = os.path.join(DATA_DIR, "password.pas")
+DEFAULT_ADMIN_HASH = os.getenv("ADMIN_HASH", "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92")
 SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
 PREFERRED_PORTS = [55000, 55001, 55002]
 FRONTEND_PORT = 55005
@@ -51,7 +50,7 @@ class FooterSettings(BaseModel):
 
 class HeaderSettings(BaseModel):
     show_logo: bool = True
-    logo_path: str = "win.png"
+    logo_path: str = "/assets/win.png"
 
 class Settings(BaseModel):
     title: str = "Городская Премия 2025"
@@ -79,6 +78,9 @@ class VoteRequest(BaseModel):
 class AdminLogin(BaseModel):
     password: str
 
+class RegisterRequest(BaseModel):
+    client_id: str
+
 # --- JSON DB ---
 class JsonDB:
     """Простая файловая база данных на основе JSON."""
@@ -88,7 +90,8 @@ class JsonDB:
         self.files = {
             "settings": os.path.join(directory, "settings.json"),
             "categories": os.path.join(directory, "categories.json"),
-            "votes": os.path.join(directory, "votes.json")
+            "votes": os.path.join(directory, "votes.json"),
+            "users": os.path.join(directory, "users.json")
         }
         self._init_db()
 
@@ -99,6 +102,8 @@ class JsonDB:
             self.save("categories", [])
         if not os.path.exists(self.files["votes"]):
             self.save("votes", [])
+        if not os.path.exists(self.files["users"]):
+            self.save("users", [])
 
     def load(self, table: str) -> Any:
         try:
@@ -128,6 +133,24 @@ def get_client_ip(request: Request) -> str:
         return forwarded.split(",")[0].strip()
     return request.client.host
 
+def get_voter_key(request: Request) -> str:
+    client_id = request.headers.get("x-client-id")
+    if client_id:
+        return f"client:{client_id}"
+    return f"ip:{get_client_ip(request)}"
+
+def load_admin_password_hash() -> str:
+    if os.path.exists(PASSWORD_FILE):
+        try:
+            with open(PASSWORD_FILE, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+            if raw:
+                is_hash = len(raw) == 64 and all(c in "0123456789abcdef" for c in raw.lower())
+                return raw.lower() if is_hash else hashlib.sha256(raw.encode()).hexdigest()
+        except Exception as exc:
+            logger.warning("Не удалось прочитать password.pas: %s", exc)
+    return DEFAULT_ADMIN_HASH
+
 async def verify_admin(x_admin_token: str = Header(None)):
     if x_admin_token != SECRET_KEY:
         raise HTTPException(status_code=401, detail="Доступ запрещен: неверный токен")
@@ -144,10 +167,11 @@ async def get_categories():
 @app.get("/api/my-votes")
 async def get_my_votes(request: Request):
     ip = get_client_ip(request)
+    voter_key = get_voter_key(request)
     votes = db.load("votes")
     my_votes = {}
     for v in votes:
-        if v.get('ip_address') == ip:
+        if v.get("voter_key") == voter_key or (voter_key.startswith("ip:") and v.get("ip_address") == ip):
             cat_id = v['category_id']
             if cat_id not in my_votes:
                 my_votes[cat_id] = []
@@ -177,9 +201,13 @@ async def cast_vote(vote_req: VoteRequest, request: Request):
     if not settings.get('is_voting_active'):
         raise HTTPException(status_code=400, detail="Голосование в данный момент закрыто")
     ip = get_client_ip(request)
+    voter_key = get_voter_key(request)
     votes = db.load("votes")
     if settings.get('anti_abuse_enabled'):
-        user_cat_votes = [v for v in votes if v['ip_address'] == ip and v['category_id'] == vote_req.category_id]
+        user_cat_votes = [
+            v for v in votes
+            if v.get("voter_key") == voter_key and v['category_id'] == vote_req.category_id
+        ]
         categories = db.load("categories")
         category = next((c for c in categories if c['id'] == vote_req.category_id), None)
         if not category:
@@ -190,6 +218,7 @@ async def cast_vote(vote_req: VoteRequest, request: Request):
         "category_id": vote_req.category_id,
         "participant_id": vote_req.participant_id,
         "ip_address": ip,
+        "voter_key": voter_key,
         "timestamp": datetime.utcnow().isoformat()
     }
     votes.append(new_vote)
@@ -205,9 +234,14 @@ async def reset_my_vote(request: Request, payload: Dict[str, str]):
     if not category_id:
         raise HTTPException(status_code=400, detail="category_id обязателен")
     ip = get_client_ip(request)
+    voter_key = get_voter_key(request)
     votes = db.load("votes")
     initial_count = len(votes)
-    new_votes = [v for v in votes if not (v['ip_address'] == ip and v['category_id'] == category_id)]
+    new_votes = [
+        v for v in votes
+        if not ((v.get("voter_key") == voter_key or (voter_key.startswith("ip:") and v.get("ip_address") == ip))
+                and v['category_id'] == category_id)
+    ]
     if len(new_votes) == initial_count:
         return {"status": "skipped", "message": "Голосов для удаления не найдено"}
     db.save("votes", new_votes)
@@ -216,17 +250,39 @@ async def reset_my_vote(request: Request, payload: Dict[str, str]):
 # --- АДМИН ---
 @app.post("/api/admin/login")
 async def admin_login(login: AdminLogin):
-    if hashlib.sha256(login.password.encode()).hexdigest() == ADMIN_PASSWORD_HASH:
+    if hashlib.sha256(login.password.encode()).hexdigest() == load_admin_password_hash():
         logger.info("Admin logged in successfully")
         return {"token": SECRET_KEY}
     raise HTTPException(status_code=401, detail="Неверный пароль администратора")
+
+@app.post("/api/register")
+async def register_user(payload: RegisterRequest, request: Request):
+    client_id = payload.client_id.strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id обязателен")
+    users = db.load("users")
+    existing = next((u for u in users if u.get("client_id") == client_id), None)
+    if existing:
+        return {"user_id": existing["user_id"]}
+    next_number = len(users) + 1
+    user_id = f"U{next_number:05d}"
+    users.append({
+        "user_id": user_id,
+        "client_id": client_id,
+        "registered_at": datetime.utcnow().isoformat(),
+        "ip_address": get_client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")
+    })
+    db.save("users", users)
+    return {"user_id": user_id}
 
 @app.get("/api/admin/data", dependencies=[Depends(verify_admin)])
 async def get_admin_data():
     return {
         "settings": db.load("settings"),
         "categories": db.load("categories"),
-        "votes": db.load("votes")
+        "votes": db.load("votes"),
+        "users": db.load("users")
     }
 
 @app.post("/api/admin/settings", dependencies=[Depends(verify_admin)])
@@ -244,7 +300,7 @@ frontend_app = FastAPI(title="Frontend Server")
 frontend_app.mount("/", StaticFiles(directory=os.getcwd(), html=True), name="frontend")
 
 def run_frontend():
-    logger.info(f"Запуск FRONTEND сервера на порту {FRONTEND_PORT}")
+    logger.info("Запуск FRONTEND сервера на порту %s", FRONTEND_PORT)
     uvicorn.run(frontend_app, host="0.0.0.0", port=FRONTEND_PORT)
 
 # --- ЗАПУСК ---
